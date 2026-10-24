@@ -1496,3 +1496,4 @@ issue1700       normal,2019
 vhpi23          vhpi
 vhpi25          vhpi
 vhpi22          tcl,gold,plugin=vhpi_test
+vhpi24          vhpi
