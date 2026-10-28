@@ -56,6 +56,7 @@ struct _lib_unit {
    uint64_t      mtime;
    unit_meta_t   meta;
    lib_unit_t   *next;
+   lib_unit_t   *undo;
    tree_kind_t   kind;
    bool          dirty;
    bool          error;
@@ -367,8 +368,20 @@ static lib_unit_t *lib_put_aux(lib_t lib, object_t *object, bool dirty,
       where = xcalloc(sizeof(lib_unit_t));
       fresh = true;
    }
-   else
+   else {
       lib_mark_obsolete(lib, where, object);
+
+      if (error && !where->error) {
+         // Keep the previous version in case this unit is discarded
+         lib_unit_t *undo = xmalloc(sizeof(lib_unit_t));
+         *undo = *where;
+         where->undo = undo;
+      }
+      else if (!error && where->undo != NULL) {
+         free(where->undo);
+         where->undo = NULL;
+      }
+   }
 
    where->object = object;
    where->name   = name;
@@ -389,7 +402,9 @@ static lib_unit_t *lib_put_aux(lib_t lib, object_t *object, bool dirty,
       *it = where;
    }
 
-   lib_add_to_index(lib, name, where->kind);
+   // Units with errors are never saved so must not appear in the index
+   if (!error)
+      lib_add_to_index(lib, name, where->kind);
 
    ghash_put(lib->lookup, name, where);
 
@@ -776,6 +791,7 @@ void lib_free(lib_t lib)
 
    for (lib_unit_t *lu = lib->units, *tmp; lu; lu = tmp) {
       tmp = lu->next;
+      free(lu->undo);
       free(lu);
    }
    ghash_free(lib->lookup);
@@ -857,6 +873,37 @@ void lib_put_error(lib_t lib, tree_t unit)
 {
    object_t *obj = tree_to_object(unit);
    lib_put_aux(lib, obj, true, true, get_real_time(), NULL);
+}
+
+void lib_discard_errors(lib_t lib)
+{
+   for (lib_unit_t **it = &(lib->units); *it != NULL; ) {
+      lib_unit_t *lu = *it;
+      if (!lu->error) {
+         it = &(lu->next);
+         continue;
+      }
+
+      // Units which depend on the discarded version cannot be saved
+      arena_set_obsolete(object_arena(lu->object), true);
+
+      if (lu->undo != NULL) {
+         // Restore the version the unit with errors replaced
+         lib_unit_t *undo = lu->undo;
+         undo->next = lu->next;
+         *lu = *undo;
+         free(undo);
+
+         arena_set_obsolete(object_arena(lu->object), false);
+         it = &(lu->next);
+      }
+      else {
+         // Any saved version will be read again from disk
+         ghash_delete(lib->lookup, lu->name);
+         *it = lu->next;
+         free(lu);
+      }
+   }
 }
 
 static void lib_encode_file_name(ident_t id, text_buf_t *tb)

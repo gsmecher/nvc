@@ -56,6 +56,7 @@ void lib_set_work(lib_t lib);
 
 void lib_put(lib_t lib, tree_t unit);
 void lib_put_error(lib_t lib, tree_t unit);
+void lib_discard_errors(lib_t lib);
 void lib_put_vlog(lib_t lib, vlog_node_t module);
 void lib_put_meta(lib_t lib, tree_t unit, const unit_meta_t *meta);
 object_t *lib_get_generic(lib_t lib, ident_t ident, const unit_meta_t **meta);

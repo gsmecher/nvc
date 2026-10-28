@@ -325,6 +325,42 @@ START_TEST(test_lib_save)
 }
 END_TEST
 
+START_TEST(test_lib_discard)
+{
+   make_new_arena();
+
+   tree_t good = tree_new(T_ENTITY);
+   tree_set_ident(good, ident_new("TEST_LIB.ONE"));
+   lib_put(work, good);
+
+   lib_save(work);
+
+   make_new_arena();
+
+   tree_t bad1 = tree_new(T_ENTITY);
+   tree_set_ident(bad1, ident_new("TEST_LIB.ONE"));
+   lib_put_error(work, bad1);
+
+   make_new_arena();
+
+   tree_t bad2 = tree_new(T_ENTITY);
+   tree_set_ident(bad2, ident_new("TEST_LIB.TWO"));
+   lib_put_error(work, bad2);
+
+   fail_unless(lib_had_errors(work, ident_new("TEST_LIB.ONE")));
+   fail_unless(lib_index_size(work) == 1);
+
+   lib_discard_errors(work);
+
+   fail_if(lib_had_errors(work, ident_new("TEST_LIB.ONE")));
+   fail_unless(lib_get(work, ident_new("TEST_LIB.ONE")) == good);
+   fail_unless(lib_get(work, ident_new("TEST_LIB.TWO")) == NULL);
+   fail_unless(lib_index_size(work) == 1);
+
+   lib_save(work);
+}
+END_TEST
+
 Suite *get_lib_tests(void)
 {
    Suite *s = suite_create("lib");
@@ -334,6 +370,7 @@ Suite *get_lib_tests(void)
    tcase_add_test(tc_core, test_lib_new);
    tcase_add_test(tc_core, test_lib_fopen);
    tcase_add_test(tc_core, test_lib_save);
+   tcase_add_test(tc_core, test_lib_discard);
    suite_add_tcase(s, tc_core);
 
    return s;

@@ -204,7 +204,7 @@ void arena_set_flags(object_arena_t *arena, uint32_t flags)
 
 void arena_set_obsolete(object_arena_t *arena, bool obsolete)
 {
-   arena->obsolete = true;
+   arena->obsolete = obsolete;
 }
 
 object_arena_t *object_arena(object_t *object)
