@@ -1987,7 +1987,7 @@ START_TEST(test_href2)
 
    object_t *top[2] = { vlog_to_object(m1), vlog_to_object(m2) };
 
-   tree_t e = elab(top, ARRAY_LEN(top), j, ur, mc, NULL, NULL, m);
+   tree_t e = elab(top, ARRAY_LEN(top), NULL, 0, j, ur, mc, NULL, NULL, m);
    ck_assert_ptr_nonnull(e);
 
    model_free(m);

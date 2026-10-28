@@ -20,6 +20,7 @@
 
 #include "util.h"
 #include "prim.h"
+#include "phase.h"
 #include "tree.h"
 
 #include <check.h>
@@ -90,6 +91,9 @@ int nvc_run_test(Suite *s);
 unit_registry_t *get_registry(void);
 mir_context_t *get_mir(void);
 jit_t *get_jit(void);
+void set_generic(const char *name, const char *value);
+int get_generics(const elab_generic_t **result);
+void clear_generics(void);
 tree_t run_elab(void);
 tree_t run_elab_with_model(rt_model_t *m);
 object_t *analyse_file(void);

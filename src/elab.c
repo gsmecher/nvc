@@ -75,6 +75,7 @@ typedef struct _elab_ctx {
    cover_obj_t       cscope;
    unsigned          depth;
    unsigned          errors;
+   generic_list_t  **generics;
 } elab_ctx_t;
 
 typedef struct {
@@ -117,8 +118,6 @@ static void elab_verilog_processes(vlog_node_t v, const elab_ctx_t *ctx);
 static void elab_decls(tree_t t, const elab_ctx_t *ctx);
 static void elab_push_scope(tree_t t, elab_ctx_t *ctx);
 static void elab_pop_scope(elab_ctx_t *ctx);
-
-static generic_list_t *generic_override = NULL;
 
 static lib_t elab_find_lib(ident_t name, const elab_ctx_t *ctx)
 {
@@ -1176,13 +1175,13 @@ static tree_t elab_parse_generic_string(tree_t generic, const char *str)
 
 static tree_t elab_find_generic_override(tree_t g, const elab_ctx_t *ctx)
 {
-   if (generic_override == NULL)
+   if (*ctx->generics == NULL)
       return NULL;
 
    ident_t name = tree_ident(g);
 
    generic_list_t **it, *tmp;
-   for (it = &generic_override;
+   for (it = ctx->generics;
         *it && !ident_casecmp((*it)->name, name);
         it = &((*it)->next))
       ;
@@ -1201,7 +1200,7 @@ static tree_t elab_find_generic_override(tree_t g, const elab_ctx_t *ctx)
 
 static tree_t elab_override_instance_generics(tree_t t, const elab_ctx_t *ctx)
 {
-   if (generic_override == NULL)
+   if (*ctx->generics == NULL)
       return t;
 
    ident_t prefix = tree_ident(t);
@@ -1229,7 +1228,7 @@ static tree_t elab_override_instance_generics(tree_t t, const elab_ctx_t *ctx)
       ident_t qual = ident_prefix(prefix, tree_ident(g), '.');
 
       generic_list_t **it, *tmp;
-      for (it = &generic_override;
+      for (it = ctx->generics;
            *it && !ident_casecmp((*it)->name, qual);
            it = &((*it)->next))
          ;
@@ -1468,6 +1467,7 @@ static void elab_inherit_context(elab_ctx_t *ctx, const elab_ctx_t *parent)
    ctx->errors   = error_count();
    ctx->pool     = parent->pool;
    ctx->cscope   = parent->cscope;
+   ctx->generics = parent->generics;
 }
 
 static bool elab_new_errors(const elab_ctx_t *ctx)
@@ -2811,21 +2811,41 @@ static tree_t elab_top_level_binding(tree_t arch, const elab_ctx_t *ctx)
    return inst;
 }
 
-void elab_set_generic(const char *name, const char *value)
+static generic_list_t *elab_generic_list(const elab_generic_t *generics,
+                                         int ngenerics)
 {
-   ident_t id = ident_new(name);
+   generic_list_t *list = NULL;
+   for (int i = 0; i < ngenerics; i++) {
+      ident_t id = ident_new(generics[i].name);
 
-   for (generic_list_t *it = generic_override; it != NULL; it = it->next) {
-      if (it->name == id)
-         fatal("generic %s already has value '%s'", name, it->value);
+      generic_list_t *dup = list;
+      while (dup != NULL && dup->name != id)
+         dup = dup->next;
+
+      if (dup != NULL) {
+         errorf("generic %s already has value '%s'", generics[i].name,
+                dup->value);
+         continue;
+      }
+
+      generic_list_t *new = xmalloc(sizeof(generic_list_t));
+      new->name  = id;
+      new->value = xstrdup(generics[i].value);
+      new->next  = list;
+
+      list = new;
    }
 
-   generic_list_t *new = xmalloc(sizeof(generic_list_t));
-   new->name  = id;
-   new->value = xstrdup(value);
-   new->next  = generic_override;
+   return list;
+}
 
-   generic_override = new;
+static void elab_free_generic_list(generic_list_t *list)
+{
+   for (generic_list_t *it = list, *tmp; it != NULL; it = tmp) {
+      tmp = it->next;
+      free(it->value);
+      free(it);
+   }
 }
 
 static void elab_vhdl_root(tree_t t, const elab_ctx_t *ctx)
@@ -3013,7 +3033,8 @@ static void elab_print_stats(const elab_ctx_t *ctx)
    printf("\n");
 }
 
-tree_t elab(object_t **top, int ntop, jit_t *jit, unit_registry_t *ur,
+tree_t elab(object_t **top, int ntop, const elab_generic_t *generics,
+            int ngenerics, jit_t *jit, unit_registry_t *ur,
             mir_context_t *mc, cover_data_t *cover, sdf_file_t *sdf,
             rt_model_t *m)
 {
@@ -3040,6 +3061,10 @@ tree_t elab(object_t **top, int ntop, jit_t *jit, unit_registry_t *ur,
 
    lib_t work = lib_work();
 
+   // Overrides are removed from the list as they are used
+   const unsigned base_errors = error_count();
+   generic_list_t *overrides = elab_generic_list(generics, ngenerics);
+
    elab_ctx_t ctx = {
       .out       = e,
       .roots     = top,
@@ -3056,9 +3081,11 @@ tree_t elab(object_t **top, int ntop, jit_t *jit, unit_registry_t *ur,
       .model     = m,
       .scope     = create_scope(m, e, NULL),
       .pool      = pool_new(),
+      .generics  = &overrides,
    };
 
-   call_with_model(m, elab_root_cb, &ctx);
+   if (error_count() == base_errors)
+      call_with_model(m, elab_root_cb, &ctx);
 
    if (opt_get_int(OPT_ELAB_STATS))
       elab_print_stats(&ctx);
@@ -3073,14 +3100,18 @@ tree_t elab(object_t **top, int ntop, jit_t *jit, unit_registry_t *ur,
    hash_free(ctx.mracache);
    pool_free(ctx.pool);
 
-   if (error_count() > 0)
+   if (error_count() > 0) {
+      elab_free_generic_list(overrides);
       return NULL;
+   }
 
    if (opt_get_verbose(OPT_ELAB_VERBOSE, NULL))
       dump(e);
 
-   for (generic_list_t *it = generic_override; it != NULL; it = it->next)
+   for (generic_list_t *it = overrides; it != NULL; it = it->next)
       warnf("generic value for %pI not used", it->name);
+
+   elab_free_generic_list(overrides);
 
    ident_t b0_name = tree_ident(tree_stmt(e, 0));
    ident_t vu_name = ident_prefix(lib_name(ctx.library), b0_name, '.');

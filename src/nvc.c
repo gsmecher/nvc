@@ -461,17 +461,14 @@ static int analyse(int argc, char **argv, cmd_state_t *state)
    return argc > 1 ? process_command(argc, argv, state) : EXIT_SUCCESS;
 }
 
-static void parse_generic(const char *str)
+static void parse_generic(const char *str, elab_generic_t *g)
 {
-   char *copy LOCAL = xstrdup(str);
-
-   char *split = strchr(copy, '=');
-   if (split == NULL || *(split + 1) == '\0' || *copy == '\0')
+   const char *split = strchr(str, '=');
+   if (split == NULL || *(split + 1) == '\0' || split == str)
       fatal("invalid generic specification '%s' (use -gNAME=VALUE)", str);
 
-   *split = '\0';
-
-   elab_set_generic(copy, split + 1);
+   g->name  = istr(ident_new_n(str, split - str));
+   g->value = split + 1;
 }
 
 static void set_top_level(char **argv, int next_cmd, cmd_state_t *state)
@@ -580,6 +577,9 @@ static int elaborate(int argc, char **argv, cmd_state_t *state)
    int cover_array_limit = 0;
    int threshold = 1;
    const int next_cmd = scan_cmd(2, argc, argv);
+   elab_generic_t *generics LOCAL =
+      xmalloc_array(next_cmd, sizeof(elab_generic_t));
+   int ngenerics = 0;
    int c, index = 0;
    const char *spec = ":Vg:O:jt";
    while ((c = getopt_long(next_cmd, argv, spec, long_options, &index)) != -1) {
@@ -615,7 +615,7 @@ static int elaborate(int argc, char **argv, cmd_state_t *state)
          // No effect
          break;
       case 'g':
-         parse_generic(optarg);
+         parse_generic(optarg, &(generics[ngenerics++]));
          break;
       case 's':
          cover_spec_file = optarg;
@@ -718,8 +718,9 @@ static int elaborate(int argc, char **argv, cmd_state_t *state)
 
    vhpi_run_callbacks(vhpiCbStartOfElaboration);
 
-   tree_t e = elab(tops, ntops, state->jit, state->registry, state->mir,
-                   state->cover, NULL, state->model);
+   tree_t e = elab(tops, ntops, generics, ngenerics, state->jit,
+                   state->registry, state->mir, state->cover, NULL,
+                   state->model);
 
    if (e == NULL)
       return EXIT_FAILURE;

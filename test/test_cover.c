@@ -40,8 +40,12 @@ static cover_data_t *run_cover(tree_t top)
 
    rt_model_t *m = model_new(j, db);
 
+   const elab_generic_t *generics;
+   const int ngenerics = get_generics(&generics);
+
    object_t *tops[1] = { tree_to_object(top) };
-   tree_t e = elab(tops, 1, j, ur, mc, db, NULL, m);
+   tree_t e = elab(tops, 1, generics, ngenerics, j, ur, mc, db, NULL, m);
+   clear_generics();
    ck_assert_ptr_nonnull(e);
    ck_assert_int_eq(error_count(), 0);
 
@@ -113,7 +117,7 @@ START_TEST(test_toggle1)
 {
    input_from_file(TESTDIR "/cover/toggle1.vhd");
 
-   elab_set_generic("G_VAL", "2");
+   set_generic("G_VAL", "2");
 
    tree_t top = parse_check_and_simplify(T_ENTITY, T_ARCH);
 
@@ -186,11 +190,11 @@ START_TEST(test_merge1)
 
    tree_t top = parse_check_and_simplify(T_ENTITY, T_ARCH);
 
-   elab_set_generic("G_VAL", "0");
+   set_generic("G_VAL", "0");
 
    cover_data_t *db1 = run_cover(top);
 
-   elab_set_generic("G_VAL", "1");
+   set_generic("G_VAL", "1");
 
    cover_data_t *db2 = run_cover(top);
 
@@ -244,11 +248,11 @@ START_TEST(test_merge2)
 
    tree_t top = parse_check_and_simplify(T_ENTITY, T_ARCH);
 
-   elab_set_generic("G_VAL", "1");
+   set_generic("G_VAL", "1");
 
    cover_data_t *db1 = run_cover(top);
 
-   elab_set_generic("G_VAL", "2");
+   set_generic("G_VAL", "2");
 
    cover_data_t *db2 = run_cover(top);
 

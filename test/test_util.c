@@ -16,6 +16,7 @@
 //
 
 #include "test_util.h"
+#include "array.h"
 #include "common.h"
 #include "diag.h"
 #include "diag.h"
@@ -41,6 +42,8 @@ static unsigned         errors_seen = 0;
 static unit_registry_t *registry    = NULL;
 static mir_context_t   *mir_context = NULL;
 static jit_t           *jit         = NULL;
+
+static A(elab_generic_t) generics = AINIT;
 
 static void test_error_fn(diag_t *d, void *context)
 {
@@ -117,6 +120,8 @@ static void teardown_per_test(void)
    lib_set_work(NULL);
    lib_free(test_lib);
    test_lib = NULL;
+
+   clear_generics();
 }
 
 void expect_errors(const error_t *lines)
@@ -220,6 +225,24 @@ object_t *analyse_file(void)
    return top;
 }
 
+void set_generic(const char *name, const char *value)
+{
+   elab_generic_t g = { name, value };
+   APUSH(generics, g);
+}
+
+int get_generics(const elab_generic_t **result)
+{
+   *result = generics.items;
+   return generics.count;
+}
+
+void clear_generics(void)
+{
+   // Generics set by a test only apply to the next elaboration
+   ACLEAR(generics);
+}
+
 tree_t run_elab_with_model(rt_model_t *m)
 {
    mir_context_t *mc = get_mir();
@@ -228,7 +251,10 @@ tree_t run_elab_with_model(rt_model_t *m)
 
    object_t *top[1] = { analyse_file() };
 
-   return elab(top, 1, j, ur, mc, NULL, NULL, m);
+   tree_t e = elab(top, 1, generics.items, generics.count, j, ur, mc, NULL,
+                   NULL, m);
+   clear_generics();
+   return e;
 }
 
 tree_t run_elab(void)

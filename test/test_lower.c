@@ -1999,7 +1999,7 @@ START_TEST(test_cover)
    rt_model_t *m = model_new(jit, data);
 
    object_t *top[1] = { tree_to_object(a) };
-   elab(top, 1, jit, ur, mc, data, NULL, m);
+   elab(top, 1, NULL, 0, jit, ur, mc, data, NULL, m);
 
    vcode_unit_t v0 = find_unit("WORK.COVER_ENT.P1");
    vcode_select_unit(v0);
@@ -2576,7 +2576,7 @@ START_TEST(test_choice1)
    cover_data_t *data = cover_data_init(COVER_MASK_BRANCH, 0, 0);
    rt_model_t *m = model_new(jit, NULL);
    object_t *top[1] = { tree_to_object(a) };
-   elab(top, 1, jit, ur, mc, data, NULL, m);
+   elab(top, 1, NULL, 0, jit, ur, mc, data, NULL, m);
 
    vcode_unit_t v0 = find_unit("WORK.CHOICE1.P1");
    vcode_select_unit(v0);
@@ -5093,7 +5093,7 @@ START_TEST(test_issue582)
    rt_model_t *m = model_new(jit, NULL);
 
    object_t *top[1] = { tree_to_object(a) };
-   elab(top, 1, jit, ur, mc, data, NULL, m);
+   elab(top, 1, NULL, 0, jit, ur, mc, data, NULL, m);
 
    model_free(m);
    jit_free(jit);
@@ -6617,7 +6617,7 @@ START_TEST(test_issue1194)
    rt_model_t *m = model_new(jit, NULL);
 
    object_t *top[1] = { tree_to_object(a) };
-   elab(top, 1, jit, get_registry(), get_mir(), data, NULL, m);
+   elab(top, 1, NULL, 0, jit, get_registry(), get_mir(), data, NULL, m);
 
    mir_unit_t *mu = find_unit2("WORK.ISSUE1194.B._I0");
 

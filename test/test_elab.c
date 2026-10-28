@@ -372,11 +372,11 @@ START_TEST(test_toplevel2)
    };
    expect_errors(expect);
 
-   elab_set_generic("I", "4");
-   elab_set_generic("S", "hello");
-   elab_set_generic("B", "'1'");
-   elab_set_generic("V", "101");
-   elab_set_generic("UNUSED", "6678");
+   set_generic("I", "4");
+   set_generic("S", "hello");
+   set_generic("B", "'1'");
+   set_generic("V", "101");
+   set_generic("UNUSED", "6678");
 
    tree_t top = run_elab();
    fail_if(top == NULL);
@@ -1171,9 +1171,9 @@ END_TEST
 
 START_TEST(test_toplevel4)
 {
-   elab_set_generic("CONFIG", "hello");
-   elab_set_generic("R", "2.5");
-   elab_set_generic("T", "5000 us");
+   set_generic("CONFIG", "hello");
+   set_generic("R", "2.5");
+   set_generic("T", "5000 us");
 
    input_from_file(TESTDIR "/elab/toplevel4.vhd");
 
@@ -1339,7 +1339,7 @@ END_TEST
 
 START_TEST(test_issue228)
 {
-   elab_set_generic("G", "10");
+   set_generic("G", "10");
 
    input_from_file(TESTDIR "/elab/issue228.vhd");
 
@@ -1654,7 +1654,7 @@ START_TEST(test_issue759)
 
    rt_model_t *m = model_new(jit, cover);
    object_t *top[1] = { tree_to_object(a) };
-   tree_t e = elab(top, 1, jit, ur, mc, cover, NULL, m);
+   tree_t e = elab(top, 1, NULL, 0, jit, ur, mc, cover, NULL, m);
    fail_if(e == NULL);
 
    model_free(m);
@@ -1794,7 +1794,7 @@ START_TEST(test_vlog1)
    rt_model_t *m = model_new(j, NULL);
 
    object_t *tops[1] = { obj };
-   tree_t top = elab(tops, 1, j, ur, mc, NULL, NULL, m);
+   tree_t top = elab(tops, 1, NULL, 0, j, ur, mc, NULL, NULL, m);
    fail_unless(top == NULL);
 
    model_free(m);
@@ -1991,7 +1991,7 @@ START_TEST(test_issue1012)
    rt_model_t *m = model_new(jit, NULL);
 
    object_t *top[1] = { tree_to_object(a) };
-   tree_t e = elab(top, 1, jit, ur, mc, cover, NULL, m);
+   tree_t e = elab(top, 1, NULL, 0, jit, ur, mc, cover, NULL, m);
    fail_if(e == NULL);
 
    model_free(m);
@@ -2302,7 +2302,7 @@ START_TEST(test_issue1421)
 {
    opt_set_int(OPT_PRESERVE_CASE, 1);
 
-   elab_set_generic("MY_GENERIC", "5");
+   set_generic("MY_GENERIC", "5");
 
    input_from_file(TESTDIR "/elab/issue1421.vhd");
 
@@ -2417,7 +2417,7 @@ END_TEST
 START_TEST(test_assert8)
 {
    set_standard(STD_08);
-   elab_set_generic("G", "20");
+   set_generic("G", "20");
 
    input_from_file(TESTDIR "/elab/assert8.vhd");
 
@@ -2431,6 +2431,65 @@ START_TEST(test_assert8)
    (void)run_elab_with_model(m);
    ck_assert_int_eq(model_exit_status(m), EXIT_FAILURE);
    model_free(m);
+
+   check_expected_errors();
+}
+END_TEST
+
+START_TEST(test_generics1)
+{
+   input_from_file(TESTDIR "/elab/toplevel2.vhd");
+
+   const error_t expect[] = {
+      { LINE_INVALID, "generic value for UNUSED not used" },
+      { LINE_INVALID, "generic value for UNUSED not used" },
+      { LINE_INVALID, "generic I already has value '4'" },
+      { -1, NULL }
+   };
+   expect_errors(expect);
+
+   object_t *obj = analyse_file();
+   fail_if(obj == NULL);
+
+   // Overrides only apply to the elaboration they are passed to
+   const elab_generic_t g1[] = {
+      { "I", "4" }, { "S", "hello" }, { "B", "'1'" }, { "V", "101" },
+      { "UNUSED", "1" }
+   };
+   const elab_generic_t g2[] = {
+      { "I", "4" }, { "S", "hello" }, { "B", "'1'" }, { "V", "101" },
+      { "UNUSED", "2" }
+   };
+   const elab_generic_t g3[] = {
+      { "I", "4" }, { "S", "hello" }, { "B", "'1'" }, { "V", "101" },
+      { "I", "5" }
+   };
+
+   const struct {
+      const elab_generic_t *generics;
+      int                   ngenerics;
+      bool                  ok;
+   } cases[] = {
+      { g1, ARRAY_LEN(g1), true },
+      { g2, ARRAY_LEN(g2), true },
+      { g3, ARRAY_LEN(g3), false },
+   };
+
+   for (int i = 0; i < ARRAY_LEN(cases); i++) {
+      mir_context_t *mc = mir_context_new();
+      unit_registry_t *ur = unit_registry_new(mc);
+      jit_t *j = jit_new(ur, mc);
+      rt_model_t *m = model_new(j, NULL);
+
+      tree_t e = elab(&obj, 1, cases[i].generics, cases[i].ngenerics, j, ur,
+                      mc, NULL, NULL, m);
+      ck_assert_int_eq(e != NULL, cases[i].ok);
+
+      model_free(m);
+      jit_free(j);
+      unit_registry_free(ur);
+      mir_context_free(mc);
+   }
 
    check_expected_errors();
 }
@@ -2559,6 +2618,7 @@ Suite *get_elab_tests(void)
    tcase_add_test(tc, test_issue1615);
    tcase_add_test(tc, test_issue1638);
    tcase_add_test(tc, test_assert8);
+   tcase_add_test(tc, test_generics1);
    suite_add_tcase(s, tc);
 
    return s;
