@@ -25,8 +25,12 @@
 #include "phase.h"
 #include "rt/assert.h"
 #include "rt/model.h"
+#include "scan.h"
+#include "sdf/sdf-phase.h"
 #include "tool.h"
 #include "vhpi/vhpi-model.h"
+#include "vlog/vlog-node.h"
+#include "vlog/vlog-phase.h"
 #include "vpi/vpi-model.h"
 
 #include <assert.h>
@@ -165,6 +169,136 @@ static jit_t *tool_new_jit(unit_registry_t *ur, mir_context_t *mc)
    return jit;
 }
 
+static void analyse_sdf(const char *file)
+{
+   sdf_file_t *sdf_file = sdf_parse(file, 0);
+   progress("analysed SDF file: %s", file);
+
+   if (sdf_file != NULL) {
+      warnf("SDF is not yet supported");
+      sdf_file_free(sdf_file);
+   }
+}
+
+static void analyse_file(const char *file, jit_t *jit, unit_registry_t *ur,
+                         mir_context_t *mc)
+{
+   input_from_file(file);
+
+   switch (source_kind()) {
+   case SOURCE_VHDL:
+      {
+         lib_t work = lib_work();
+         int base_errors = 0;
+         tree_t unit;
+         while (base_errors = error_count(), (unit = parse())) {
+            if (error_count() == base_errors) {
+               lib_put(work, unit);
+
+               simplify_local(unit, jit, ur, mc);
+               bounds_check(unit);
+            }
+            else
+               lib_put_error(work, unit);
+         }
+      }
+      break;
+
+   case SOURCE_VERILOG:
+      {
+         LOCAL_TEXT_BUF tb = tb_new();
+         vlog_preprocess(tb, true);
+
+         file_ref_t file_ref = loc_file_ref(file, NULL);
+         input_from_buffer(tb_get(tb), tb_len(tb), file_ref, SOURCE_VERILOG);
+
+         lib_t work = lib_work();
+         vlog_node_t module;
+         while ((module = vlog_parse())) {
+            if (error_count() == 0) {
+               vlog_check(module);
+
+               if (error_count() == 0) {
+                  vlog_simp(module);
+                  vlog_fold(module, mc, jit);
+                  lib_put_vlog(work, module);
+               }
+            }
+         }
+      }
+      break;
+
+   case SOURCE_SDF:
+      analyse_sdf(file);
+      break;
+   }
+}
+
+static void werror_diag_cb(diag_t *d, void *ctx)
+{
+   diag_level_t level = diag_level(d, NULL);
+   if (level != DIAG_WARN)
+      return;
+
+   diag_hint(d, NULL, "this warning is treated as an error due to "
+             "$bold$-Werror$$");
+
+   level = DIAG_ERROR;
+   diag_level(d, &level);
+}
+
+bool tool_analyse(tool_t *tool, const tool_analyse_options_t *opts, int nfiles,
+                  const char *const *files)
+{
+   // Analysis may replace design units used by the simulation, which is
+   // opened again from the elaborated design when next needed
+   tool_close(tool);
+   tool_load(tool);
+
+   lib_t work = lib_work();
+   if (opts->work != NULL)
+      lib_set_work(opts->work);
+
+   // Each analysis starts from no errors as for a separate command
+   reset_error_count();
+   set_error_limit(opts->error_limit);
+
+   if (opts->werror)
+      diag_add_hint_fn(werror_diag_cb, NULL);
+
+   // The JIT is only used to fold constants during analysis
+   mir_context_t *mc = mir_context_new();
+   unit_registry_t *ur = unit_registry_new(mc);
+   jit_t *jit = jit_new(ur, mc);
+
+   vhpi_run_callbacks(vhpiCbStartOfAnalysis);
+
+   for (int i = 0; i < nfiles; i++)
+      analyse_file(files[i], jit, ur, mc);
+
+   vhpi_run_callbacks(vhpiCbEndOfAnalysis);
+
+   if (opts->werror)
+      diag_remove_hint_fn(werror_diag_cb, NULL);
+
+   jit_free(jit);
+   unit_registry_free(ur);
+   mir_context_free(mc);
+
+   set_error_limit(0);
+
+   bool ok = error_count() == 0;
+   if (!ok)
+      lib_discard_errors(lib_work());   // Units with errors are never saved
+   else if (!opts->no_save) {
+      lib_save(lib_work());
+      ok = error_count() == 0;   // May have errors saving library
+   }
+
+   lib_set_work(work);
+   return ok;
+}
+
 tree_t tool_elaborate(tool_t *tool, const tool_elab_options_t *opts, int ntops,
                       const ident_t *tops)
 {
@@ -180,6 +314,11 @@ tree_t tool_elaborate(tool_t *tool, const tool_elab_options_t *opts, int ntops,
                 lib_name(work));
          return NULL;
       }
+   }
+
+   if (opts->sdf != NULL) {
+      // TODO: Pass min-max spec to underlying sdf_parse somehow
+      analyse_sdf(opts->sdf);
    }
 
    // Elaboration starts a new simulation

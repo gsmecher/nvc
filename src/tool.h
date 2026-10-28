@@ -22,12 +22,22 @@
 #include "lib.h"
 #include "phase.h"
 
+#define TOOL_ERROR_LIMIT 20   // Default limit for analysis errors
+
+typedef struct {
+   lib_t     work;          // Library to analyse into, NULL for work
+   unsigned  error_limit;   // Stop after this many errors, zero for none
+   bool      werror;        // Treat warnings as errors
+   bool      no_save;       // Do not save the analysed design units
+} tool_analyse_options_t;
+
 typedef struct {
    lib_t                 work;        // Library with the design or NULL
    const elab_generic_t *generics;    // Top-level generic overrides
    int                   ngenerics;
    cover_data_t         *cover;       // Coverage database or NULL
    const unit_meta_t    *meta;        // Saved with the design or NULL
+   const char           *sdf;         // SDF file to annotate or NULL
    bool                  no_save;     // Do not save the elaborated design
 } tool_elab_options_t;
 
@@ -47,6 +57,8 @@ typedef struct {
 tool_t *tool_new(const tool_options_t *opts);
 void tool_free(tool_t *tool);
 void tool_set_top(tool_t *tool, tree_t top, cover_data_t *cover);
+bool tool_analyse(tool_t *tool, const tool_analyse_options_t *opts, int nfiles,
+                  const char *const *files);
 tree_t tool_elaborate(tool_t *tool, const tool_elab_options_t *opts, int ntops,
                       const ident_t *tops);
 rt_model_t *tool_open(tool_t *tool, const tool_open_options_t *opts);

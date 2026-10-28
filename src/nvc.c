@@ -61,9 +61,6 @@
 #endif
 
 typedef struct {
-   jit_t           *jit;
-   unit_registry_t *registry;
-   mir_context_t   *mir;
    bool             user_set_std;
    tool_t          *tool;
    char            *plugins;
@@ -155,69 +152,9 @@ static bool parse_warn_option(char *optarg)
    }
 }
 
-static void analyse_file(const char *file, cmd_state_t *state)
-{
-   input_from_file(file);
+typedef A(char *) file_list_t;
 
-   switch (source_kind()) {
-   case SOURCE_VHDL:
-      {
-         lib_t work = lib_work();
-         int base_errors = 0;
-         tree_t unit;
-         while (base_errors = error_count(), (unit = parse())) {
-            if (error_count() == base_errors) {
-               lib_put(work, unit);
-
-               simplify_local(unit, state->jit, state->registry, state->mir);
-               bounds_check(unit);
-            }
-            else
-               lib_put_error(work, unit);
-         }
-      }
-      break;
-
-   case SOURCE_VERILOG:
-      {
-         LOCAL_TEXT_BUF tb = tb_new();
-         vlog_preprocess(tb, true);
-
-         file_ref_t file_ref = loc_file_ref(file, NULL);
-         input_from_buffer(tb_get(tb), tb_len(tb), file_ref, SOURCE_VERILOG);
-
-
-         lib_t work = lib_work();
-         vlog_node_t module;
-         while ((module = vlog_parse())) {
-            if (error_count() == 0) {
-               vlog_check(module);
-
-               if (error_count() == 0) {
-                  vlog_simp(module);
-                  vlog_fold(module, state->mir, state->jit);
-                  lib_put_vlog(work, module);
-               }
-            }
-         }
-      }
-      break;
-
-   case SOURCE_SDF:
-      {
-         sdf_file_t *sdf_file = sdf_parse(file, 0);
-         progress("analysed SDF file: %s", file);
-
-         if (sdf_file != NULL) {
-            warnf("SDF is not yet supported");
-            sdf_file_free(sdf_file);
-         }
-      }
-      break;
-   }
-}
-
-static void do_file_list(const char *file, cmd_state_t *state)
+static void do_file_list(const char *file, file_list_t *files)
 {
    FILE *f;
    if (strcmp(file, "-") == 0)
@@ -262,24 +199,11 @@ static void do_file_list(const char *file, cmd_state_t *state)
             tb_append(tb, *p++);
       }
 
-      analyse_file(tb_get(tb), state);
+      APUSH(*files, xstrdup(tb_get(tb)));
    }
 
    free(line);
    fclose(f);
-}
-
-static void werror_diag_cb(diag_t *d, void *ctx)
-{
-   diag_level_t level = diag_level(d, NULL);
-   if (level != DIAG_WARN)
-      return;
-
-   diag_hint(d, NULL, "this warning is treated as an error due to "
-             "$bold$-Werror$$");
-
-   level = DIAG_ERROR;
-   diag_level(d, &level);
 }
 
 static int analyse(int argc, char **argv, cmd_state_t *state)
@@ -304,7 +228,7 @@ static int analyse(int argc, char **argv, cmd_state_t *state)
    };
 
    const int next_cmd = scan_cmd(2, argc, argv);
-   int c, index = 0, error_limit = 20;
+   int c, index = 0, error_limit = TOOL_ERROR_LIMIT;
    const char *file_list = NULL;
    const char *spec = ":D:f:I:W:";
    bool no_save = false, werror = false;
@@ -379,54 +303,36 @@ static int analyse(int argc, char **argv, cmd_state_t *state)
       }
    }
 
-   set_error_limit(error_limit);
-
-   if (werror)
-      diag_add_hint_fn(werror_diag_cb, NULL);
-
-   if (state->mir == NULL)
-      state->mir = mir_context_new();
-
-   if (state->registry == NULL)
-      state->registry = unit_registry_new(state->mir);
-
-   if (state->jit != NULL)
-      jit_free(state->jit);
-
-   state->jit = jit_new(state->registry, state->mir);
-
-   vhpi_run_callbacks(vhpiCbStartOfAnalysis);
+   file_list_t files = AINIT;
 
    if (file_list != NULL)
-      do_file_list(file_list, state);
+      do_file_list(file_list, &files);
    else if (optind == next_cmd)
       fatal("missing file name");
 
    for (int i = optind; i < next_cmd; i++) {
       if (argv[i][0] == '@')
-         do_file_list(argv[i] + 1, state);
+         do_file_list(argv[i] + 1, &files);
       else
-         analyse_file(argv[i], state);
+         APUSH(files, xstrdup(argv[i]));
    }
 
-   vhpi_run_callbacks(vhpiCbEndOfAnalysis);
+   const tool_analyse_options_t opts = {
+      .work        = state->work,
+      .error_limit = error_limit,
+      .werror      = werror,
+      .no_save     = no_save,
+   };
 
-   if (werror)
-      diag_remove_hint_fn(werror_diag_cb, NULL);
+   const bool ok = tool_analyse(state->tool, &opts, files.count,
+                                (const char *const *)files.items);
 
-   jit_free(state->jit);
-   state->jit = NULL;
+   for (int i = 0; i < files.count; i++)
+      free(files.items[i]);
+   ACLEAR(files);
 
-   set_error_limit(0);
-
-   if (error_count() > 0)
+   if (!ok)
       return EXIT_FAILURE;
-
-   if (!no_save)
-      lib_save(state->work);
-
-   if (error_count() > 0)
-      return EXIT_FAILURE;   // May have errors saving library
 
    argc -= next_cmd - 1;
    argv += next_cmd - 1;
@@ -648,17 +554,13 @@ static int elaborate(int argc, char **argv, cmd_state_t *state)
       }
    }
 
-   if (sdf_args != NULL) {
-      // TODO: Pass min-max spec to underlying sdf_parse somehow
-      analyse_file(sdf_args, state);
-   }
-
    const tool_elab_options_t opts = {
       .work      = state->work,
       .generics  = generics,
       .ngenerics = ngenerics,
       .cover     = state->cover,
       .meta      = &meta,
+      .sdf       = sdf_args,
       .no_save   = no_save,
    };
 
@@ -954,7 +856,8 @@ static int run_cmd(int argc, char **argv, cmd_state_t *state)
             const ieee_warnings_t on = parse_ieee_warnings(optarg);
 
             // TODO: add an unconditional warning after 1.16
-            if (state->jit != NULL && opt_get_int(OPT_IEEE_WARNINGS) != on)
+            if (state->tool != NULL && tool_top(state->tool) != NULL
+                && opt_get_int(OPT_IEEE_WARNINGS) != on)
                warnf("the $bold$--ieee-warnings$$ option may have no effect "
                      "as the IEEE packages have already been initialised, pass "
                      "$bold$--ieee-warnings$$ as a global option instead");
@@ -2574,15 +2477,6 @@ int main(int argc, char **argv)
    const int ret = process_command(argc, argv, &state);
 
    tool_free(state.tool);
-
-   if (state.jit != NULL)
-      jit_free(state.jit);   // JIT must be shut down before exiting
-
-   if (state.registry != NULL)
-      unit_registry_free(state.registry);
-
-   if (state.mir != NULL)
-      mir_context_free(state.mir);
 
    if (state.cover != NULL)
       cover_data_free(state.cover);
