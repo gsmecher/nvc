@@ -46,6 +46,7 @@ typedef struct _search_path search_path_t;
 typedef struct _lib_index   lib_index_t;
 typedef struct _lib_list    lib_list_t;
 typedef struct _lib_unit    lib_unit_t;
+typedef struct _lib_map     lib_map_t;
 
 #define INDEX_FILE_MAGIC 0x55225511
 
@@ -58,6 +59,12 @@ struct _lib_unit {
    tree_kind_t   kind;
    bool          dirty;
    bool          error;
+};
+
+struct _lib_map {
+   lib_map_t *next;
+   ident_t    name;
+   char      *path;
 };
 
 struct _lib_index {
@@ -92,6 +99,7 @@ struct _search_path {
 static lib_t          work = NULL;
 static lib_list_t    *loaded = NULL;
 static search_path_t *search_paths = NULL;
+static lib_map_t     *lib_maps = NULL;
 
 static text_buf_t *lib_file_path(lib_t lib, const char *name);
 
@@ -474,6 +482,16 @@ static lib_t lib_loaded(ident_t name_i)
    return NULL;
 }
 
+static const char *lib_mapped_path(ident_t name_i)
+{
+   for (lib_map_t *it = lib_maps; it != NULL; it = it->next) {
+      if (it->name == name_i)
+         return it->path;
+   }
+
+   return NULL;
+}
+
 lib_t lib_new(const char *spec)
 {
    char *copy LOCAL = xstrdup(spec);
@@ -532,7 +550,15 @@ lib_t lib_new(const char *spec)
    lib_t lib = lib_loaded(name_i);
    if (lib != NULL)
       return lib;
-   else if (search != NULL && (lib = lib_find_at(name, search)) != NULL)
+
+   const char *mapped = path == name ? lib_mapped_path(name_i) : NULL;
+   if (mapped != NULL) {
+      // A plain library name uses the path given with --map
+      path   = mapped;
+      search = NULL;
+   }
+
+   if (search != NULL && (lib = lib_find_at(name, search)) != NULL)
       return lib;
    else if (search == NULL && (lib = lib_open_at(name, path)) != NULL)
       return lib;
@@ -635,9 +661,16 @@ void lib_add_search_path(const char *path)
 
 void lib_add_map(const char *name, const char *path)
 {
-   lib_t lib = lib_open_at(name, path);
-   if (lib == NULL)
-      warnf("library %s not found at %s", name, path);
+   // Remember the mapping so a library that does not exist yet is
+   // created at this path when it is first used
+   lib_map_t *new = xmalloc(sizeof(lib_map_t));
+   new->name = upcase_name(name);
+   new->path = xstrdup(path);
+   new->next = lib_maps;
+
+   lib_maps = new;
+
+   lib_open_at(name, path);
 }
 
 void lib_print_search_paths(text_buf_t *tb)
@@ -668,6 +701,10 @@ lib_t lib_find(ident_t name_i)
    lib_t lib = lib_loaded(name_i);
    if (lib != NULL)
       return lib;
+
+   const char *mapped = lib_mapped_path(name_i);
+   if (mapped != NULL)
+      return lib_open_at(istr(name_i), mapped);
 
    lib_default_search_paths();
 

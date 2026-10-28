@@ -32,3 +32,8 @@ nvc --std=1993 --map foo:subdir/foo.93 --work=foo -a test.vhd
 nvc --std=1993 --work=subdir/foo -a test.vhd
 
 [ ! -d subdir/foo ]
+
+# A mapped library that does not exist yet is created at the mapped path
+nvc --std=1993 --map bar:subdir/bar --work=bar -a pack.vhd
+[ -f subdir/bar/_NVC_LIB ]
+[ ! -d bar ]

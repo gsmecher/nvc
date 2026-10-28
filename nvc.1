@@ -176,6 +176,9 @@ for 64 megabytes.
 Specify exactly the location of the logical library
 .Ar name .
 Libraries mapped in this way will not use the normal search path.
+A mapped library that does not exist yet is created at
+.Ar path
+when it is first used, for example as the work library.
 .\" --messages
 .It Fl \-messages Ns = Ns Bo Cm full Ns | Ns Cm compact Bc
 Select the format used for printing error and informational messages.
