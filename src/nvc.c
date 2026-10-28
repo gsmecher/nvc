@@ -36,6 +36,7 @@
 #include "sdf/sdf-phase.h"
 #include "tcl/tcl-shell.h"
 #include "thread.h"
+#include "tool.h"
 #include "vhpi/vhpi-model.h"
 #include "vlog/vlog-node.h"
 #include "vlog/vlog-phase.h"
@@ -85,7 +86,6 @@ const char version_string[] =
 
 static int process_command(int argc, char **argv, cmd_state_t *state);
 static int parse_int(const char *str);
-static jit_t *get_jit(cmd_state_t *state);
 
 static ident_t to_unit_name(const char *str)
 {
@@ -692,7 +692,7 @@ static int elaborate(int argc, char **argv, cmd_state_t *state)
 
    state->mir = mir_context_new();
    state->registry = unit_registry_new(state->mir);
-   state->jit = get_jit(state);
+   state->jit = tool_new_jit(state->registry, state->mir);
    state->model = model_new(state->jit, state->cover);
 
    if (state->vhpi == NULL)
@@ -843,25 +843,6 @@ static void ctrl_c_handler(void *arg)
 {
    rt_model_t *model = arg;
    model_interrupt(model);
-}
-
-static jit_t *get_jit(cmd_state_t *state)
-{
-   jit_t *jit = jit_new(state->registry, state->mir);
-
-#if defined HAVE_LLVM && 1
-   jit_register_llvm_plugin(jit);
-#elif defined ARCH_X86_64 && 0
-   jit_register_native_plugin(jit);
-#endif
-
-   _std_standard_init();
-   _std_env_init();
-   _std_reflection_init();
-   _file_io_init();
-   _nvc_sim_pkg_init();
-
-   return jit;
 }
 
 static int plusarg_cmp(const void *lptr, const void *rptr)
@@ -1117,7 +1098,7 @@ static int run_cmd(int argc, char **argv, cmd_state_t *state)
       state->registry = unit_registry_new(state->mir);
 
    if (state->jit == NULL)
-      state->jit = get_jit(state);
+      state->jit = tool_new_jit(state->registry, state->mir);
 
    if (state->model == NULL) {
       state->model = model_new(state->jit, state->cover);
@@ -1575,7 +1556,7 @@ static tcl_shell_t *create_shell(cmd_state_t *state)
       state->registry = unit_registry_new(state->mir);
 
    if (state->jit == NULL)
-      state->jit = get_jit(state);
+      state->jit = tool_new_jit(state->registry, state->mir);
 
    if (state->vhpi == NULL)
       state->vhpi = vhpi_context_new();

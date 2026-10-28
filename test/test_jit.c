@@ -326,12 +326,6 @@ START_TEST(test_record3)
 }
 END_TEST
 
-DLLEXPORT
-void _nvc_ieee_warnings(jit_scalar_t *args)
-{
-   args[0].integer = IEEE_WARNINGS_ON;
-}
-
 START_TEST(test_ieee_warnings)
 {
    input_from_file(TESTDIR "/jit/ieeewarn.vhd");

@@ -22,6 +22,7 @@
 #include "rt/model.h"
 #include "scan.h"
 #include "tcl/tcl-shell.h"
+#include "tool.h"
 
 START_TEST(test_sanity)
 {
@@ -58,7 +59,7 @@ START_TEST(test_examine1)
 
    mir_context_t *mc = get_mir();
    unit_registry_t *ur = get_registry();
-   jit_t *j = jit_new(ur, mc);
+   jit_t *j = tool_new_jit(ur, mc);
 
    input_from_file(TESTDIR "/shell/examine1.vhd");
 
@@ -206,7 +207,7 @@ START_TEST(test_force1)
 
    mir_context_t *mc = get_mir();
    unit_registry_t *ur = get_registry();
-   jit_t *j = jit_new(ur, mc);
+   jit_t *j = tool_new_jit(ur, mc);
 
    tree_t arch = parse_check_and_simplify(T_ENTITY, T_ARCH);
 
@@ -311,7 +312,7 @@ START_TEST(test_describe1)
 
    mir_context_t *mc = get_mir();
    unit_registry_t *ur = get_registry();
-   jit_t *j = jit_new(ur, mc);
+   jit_t *j = tool_new_jit(ur, mc);
 
    input_from_file(TESTDIR "/shell/describe1.vhd");
 
