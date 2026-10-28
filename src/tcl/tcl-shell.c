@@ -19,6 +19,7 @@
 #include "common.h"
 #include "diag.h"
 #include "hash.h"
+#include "lib.h"
 #include "printf.h"
 #include "rt/assert.h"
 #include "rt/model.h"
@@ -101,12 +102,18 @@ static void shell_printf(tcl_shell_t *sh, const char *fmt, ...)
    va_end(ap);
 }
 
+static int no_model_error(tcl_shell_t *sh)
+{
+   return tcl_error(sh, "no simulation loaded, elaborate first with the "
+                    "$bold$elaborate$$ command, the $bold$-e$$ command, "
+                    "or pass the top-level design unit as a command line "
+                    "argument");
+}
+
 static bool shell_has_model(tcl_shell_t *sh)
 {
    if (sh->model == NULL) {
-      tcl_error(sh, "no simulation loaded, elaborate first with the "
-                "$bold$-e$$ command or pass the top-level design unit "
-                "as a command line argument");
+      no_model_error(sh);
       return false;
    }
 
@@ -119,6 +126,38 @@ static void shell_update_now(tcl_shell_t *sh)
 
    Tcl_UpdateLinkedVar(sh->interp, "now");
    Tcl_UpdateLinkedVar(sh->interp, "deltas");
+}
+
+static void shell_clear_objects(tcl_shell_t *sh);
+
+static void shell_forget(tcl_shell_t *sh)
+{
+   // Discard everything that refers to a simulation which has closed
+   shell_clear_objects(sh);
+
+   sh->model = NULL;
+   sh->root  = NULL;
+   sh->generation++;   // VHPI handles are no longer valid
+
+   sh->now_var = 0;
+   sh->deltas_var = 0;
+
+   Tcl_UpdateLinkedVar(sh->interp, "now");
+   Tcl_UpdateLinkedVar(sh->interp, "deltas");
+}
+
+static void shell_close(tcl_shell_t *sh)
+{
+   tool_close(sh->tool);
+   shell_forget(sh);
+}
+
+static void shell_sync(tcl_shell_t *sh)
+{
+   // The tool closes the simulation itself before analysis and
+   // elaboration but leaves it open if a command is rejected
+   if (sh->model != NULL && tool_model(sh->tool) != sh->model)
+      shell_forget(sh);
 }
 
 static bool shell_get_printer(tcl_shell_t *sh, shell_signal_t *ss)
@@ -203,8 +242,80 @@ static int shell_cmd_restart(ClientData cd, Tcl_Interp *interp,
    else if (tool_running(sh->tool))
       return tcl_error(sh, "cannot restart while the simulation is running");
 
-   tool_close(sh->tool);
-   sh->generation++;
+   shell_close(sh);
+   shell_reset(sh);
+   return TCL_OK;
+}
+
+static const char elaborate_help[] =
+   "Elaborate a design and start a new simulation\n"
+   "\n"
+   "Syntax:\n"
+   "  elaborate [options] <toplevel>...\n"
+   "\n"
+   "Any existing simulation is closed first, and forces and VHPI handles\n"
+   "from it are discarded.\n"
+   "\n"
+   "Options:\n"
+   "  -work <name>\t\tLibrary containing the design.\n"
+   "  -generic <name>=<value>\tOverride a top-level generic.\n"
+   "\n"
+   "Examples:\n"
+   "  elaborate -generic WIDTH=8 top\n";
+
+static int shell_cmd_elaborate(ClientData cd, Tcl_Interp *interp,
+                               int objc, Tcl_Obj *const objv[])
+{
+   tcl_shell_t *sh = cd;
+
+   lib_t work = lib_work();
+   elab_generic_t *generics LOCAL = xmalloc_array(objc, sizeof(elab_generic_t));
+   int ngenerics = 0;
+
+   int pos = 1;
+   for (const char *opt; (opt = next_option(&pos, objc, objv)); ) {
+      if (strcmp(opt, "-work") == 0 && pos < objc)
+         work = lib_new(Tcl_GetString(objv[pos++]));
+      else if (strcmp(opt, "-generic") == 0 && pos < objc) {
+         const char *arg = Tcl_GetString(objv[pos++]);
+         const char *eq = strchr(arg, '=');
+         if (eq == NULL || eq == arg || eq[1] == '\0')
+            return tcl_error(sh, "invalid generic override '%s', expected "
+                             "NAME=VALUE", arg);
+
+         elab_generic_t *g = &(generics[ngenerics++]);
+         g->name  = istr(ident_new_n(arg, eq - arg));
+         g->value = eq + 1;
+      }
+      else
+         return syntax_error(sh, objv);
+   }
+
+   if (pos == objc)
+      return syntax_error(sh, objv);
+   else if (tool_running(sh->tool))
+      return tcl_error(sh, "cannot elaborate while the simulation is running");
+
+   const int ntops = objc - pos;
+   ident_t *tops LOCAL = xmalloc_array(ntops, sizeof(ident_t));
+   for (int i = 0; i < ntops; i++) {
+      const char *name = Tcl_GetString(objv[pos + i]);
+      if ((tops[i] = lib_unit_name(work, name)) == NULL)
+         return tcl_error(sh, "'%s' is not a valid design unit name", name);
+   }
+
+   const tool_elab_options_t opts = {
+      .work      = work,
+      .generics  = generics,
+      .ngenerics = ngenerics,
+   };
+
+   // The tool discards the current design once elaboration starts
+   tree_t top = tool_elaborate(sh->tool, &opts, ntops, tops);
+   shell_sync(sh);
+
+   if (top == NULL)
+      return tcl_error(sh, "elaboration failed");
 
    shell_reset(sh);
    return TCL_OK;
@@ -924,6 +1035,7 @@ tcl_shell_t *shell_new(tool_t *tool)
    shell_add_cmd(sh, "find", shell_cmd_find, find_help);
    shell_add_cmd(sh, "run", shell_cmd_run, run_help);
    shell_add_cmd(sh, "restart", shell_cmd_restart, restart_help);
+   shell_add_cmd(sh, "elaborate", shell_cmd_elaborate, elaborate_help);
    shell_add_cmd(sh, "examine", shell_cmd_examine, examine_help);
    shell_add_cmd(sh, "exa", shell_cmd_examine, examine_help);
    shell_add_cmd(sh, "force", shell_cmd_force, force_help);
