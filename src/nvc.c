@@ -89,26 +89,11 @@ static jit_t *get_jit(cmd_state_t *state);
 
 static ident_t to_unit_name(const char *str)
 {
-   char *name LOCAL = xstrdup(str);
+   ident_t name = lib_unit_name(lib_work(), str);
+   if (name == NULL)
+      fatal("'%s' is not a valid design unit name", str);
 
-   char *lparen = strchr(name, '(');
-   if (lparen != NULL) {
-      char *rparen = strrchr(lparen + 1, ')');
-      if (rparen == NULL || rparen == lparen + 1 || rparen[1] != '\0')
-         fatal("'%s' is not a valid design unit name", str);
-
-      *lparen = '-';
-      *rparen = '\0';
-   }
-
-   for (char *p = name; *p; p++) {
-      if (!isalnum_iso88591(*p) && (p == name || (*p != '_' && *p != '-')))
-         fatal("'%s' is not a valid design unit name", str);
-
-      *p = toupper_iso88591(*p);
-   }
-
-   return ident_prefix(lib_name(lib_work()), ident_new(name), '.');
+   return name;
 }
 
 static int scan_cmd(int start, int argc, char **argv)

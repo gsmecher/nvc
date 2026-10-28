@@ -1136,6 +1136,32 @@ bool lib_had_errors(lib_t lib, ident_t ident)
    return false;
 }
 
+ident_t lib_unit_name(lib_t lib, const char *str)
+{
+   // Convert a name such as "top" or "top(arch)" to the name of a design
+   // unit in the library, or return NULL if it is not valid
+   char *name LOCAL = xstrdup(str);
+
+   char *lparen = strchr(name, '(');
+   if (lparen != NULL) {
+      char *rparen = strrchr(lparen + 1, ')');
+      if (rparen == NULL || rparen == lparen + 1 || rparen[1] != '\0')
+         return NULL;
+
+      *lparen = '-';
+      *rparen = '\0';
+   }
+
+   for (char *p = name; *p; p++) {
+      if (!isalnum_iso88591(*p) && (p == name || (*p != '_' && *p != '-')))
+         return NULL;
+
+      *p = toupper_iso88591(*p);
+   }
+
+   return ident_prefix(lib_name(lib), ident_new(name), '.');
+}
+
 ident_t lib_name(lib_t lib)
 {
    assert(lib != NULL);

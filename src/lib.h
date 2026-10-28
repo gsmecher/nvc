@@ -42,6 +42,7 @@ const char *lib_path(lib_t lib);
 void lib_realpath(lib_t lib, const char *name, char *buf, size_t buflen);
 void lib_destroy(lib_t lib);
 ident_t lib_name(lib_t lib);
+ident_t lib_unit_name(lib_t lib, const char *str);
 void lib_save(lib_t lib);
 void lib_add_search_path(const char *path);
 void lib_add_map(const char *name, const char *path);
