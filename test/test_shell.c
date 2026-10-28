@@ -59,23 +59,15 @@ START_TEST(test_examine1)
 
    const char *result = NULL;
 
-   mir_context_t *mc = mir_context_new();
-   unit_registry_t *ur = unit_registry_new(mc);
-   jit_t *j = tool_new_jit(ur, mc);
-
    input_from_file(TESTDIR "/shell/examine1.vhd");
 
    tree_t arch = parse_check_and_simplify(T_ENTITY, T_ARCH);
 
-   rt_model_t *m = model_new(j, NULL);
-
-   object_t *tops[1] = { tree_to_object(arch) };
-   tree_t top = elab(tops, 1, NULL, 0, j, ur, mc, NULL, NULL, m);
-   fail_if(top == NULL);
-
    tool_t *tool = tool_new(NULL);
-   tool_set_top(tool, top, NULL);
-   tool_adopt(tool, m, j, ur, mc);
+
+   const tool_elab_options_t opts = { .no_save = true };
+   ident_t name = tree_ident(arch);
+   fail_if(tool_elaborate(tool, &opts, 1, &name) == NULL);
 
    tcl_shell_t *sh = shell_new(tool);
    shell_reset(sh);
@@ -210,21 +202,13 @@ START_TEST(test_force1)
 
    input_from_file(TESTDIR "/shell/force1.vhd");
 
-   mir_context_t *mc = mir_context_new();
-   unit_registry_t *ur = unit_registry_new(mc);
-   jit_t *j = tool_new_jit(ur, mc);
-
    tree_t arch = parse_check_and_simplify(T_ENTITY, T_ARCH);
 
-   rt_model_t *m = model_new(j, NULL);
-
-   object_t *tops[1] = { tree_to_object(arch) };
-   tree_t top = elab(tops, 1, NULL, 0, j, ur, mc, NULL, NULL, m);
-   fail_if(top == NULL);
-
    tool_t *tool = tool_new(NULL);
-   tool_set_top(tool, top, NULL);
-   tool_adopt(tool, m, j, ur, mc);
+
+   const tool_elab_options_t opts = { .no_save = true };
+   ident_t name = tree_ident(arch);
+   fail_if(tool_elaborate(tool, &opts, 1, &name) == NULL);
 
    tcl_shell_t *sh = shell_new(tool);
    shell_reset(sh);
@@ -318,23 +302,15 @@ START_TEST(test_describe1)
    };
    expect_errors(expect);
 
-   mir_context_t *mc = mir_context_new();
-   unit_registry_t *ur = unit_registry_new(mc);
-   jit_t *j = tool_new_jit(ur, mc);
-
    input_from_file(TESTDIR "/shell/describe1.vhd");
 
    tree_t arch = parse_check_and_simplify(T_ENTITY, T_ARCH);
 
-   rt_model_t *m = model_new(j, NULL);
-
-   object_t *tops[1] = { tree_to_object(arch) };
-   tree_t top = elab(tops, 1, NULL, 0, j, ur, mc, NULL, NULL, m);
-   fail_if(top == NULL);
-
    tool_t *tool = tool_new(NULL);
-   tool_set_top(tool, top, NULL);
-   tool_adopt(tool, m, j, ur, mc);
+
+   const tool_elab_options_t opts = { .no_save = true };
+   ident_t name = tree_ident(arch);
+   fail_if(tool_elaborate(tool, &opts, 1, &name) == NULL);
 
    tcl_shell_t *sh = shell_new(tool);
    shell_reset(sh);

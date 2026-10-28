@@ -67,7 +67,6 @@ typedef struct {
    bool             user_set_std;
    tool_t          *tool;
    char            *plugins;
-   rt_model_t      *model;
    cover_data_t    *cover;
    ident_t          top_level;
    const char      *top_level_arg;
@@ -391,12 +390,6 @@ static int analyse(int argc, char **argv, cmd_state_t *state)
    if (state->registry == NULL)
       state->registry = unit_registry_new(state->mir);
 
-   if (state->model != NULL) {
-      // The model of an earlier elaboration or run lives in the JIT
-      model_free(state->model);
-      state->model = NULL;
-   }
-
    if (state->jit != NULL)
       jit_free(state->jit);
 
@@ -630,17 +623,12 @@ static int elaborate(int argc, char **argv, cmd_state_t *state)
 
    progress("initialising");
 
-   object_t **tops LOCAL = xmalloc_array(ntops, sizeof(object_t *));
+   ident_t *tops LOCAL = xmalloc_array(ntops, sizeof(ident_t));
    for (int i = 0; i < ntops; i++) {
-      ident_t name = to_unit_name(argv[optind + i]);
-
-      tops[i] = lib_get_generic(state->work, name, NULL);
-      if (tops[i] == NULL)
-         fatal("cannot find unit %pI in library %pI", name,
-               lib_name(state->work));
+      tops[i] = to_unit_name(argv[optind + i]);
 
       if (i == 0) {
-         state->top_level = name;
+         state->top_level = tops[i];
          state->top_level_arg = argv[optind + i];
       }
    }
@@ -665,53 +653,17 @@ static int elaborate(int argc, char **argv, cmd_state_t *state)
       analyse_file(sdf_args, state);
    }
 
-   if (state->model != NULL) {
-      model_free(state->model);
-      state->model = NULL;
-   }
+   const tool_elab_options_t opts = {
+      .work      = state->work,
+      .generics  = generics,
+      .ngenerics = ngenerics,
+      .cover     = state->cover,
+      .meta      = &meta,
+      .no_save   = no_save,
+   };
 
-   if (state->jit != NULL) {
-      jit_free(state->jit);
-      state->jit = NULL;
-   }
-
-   if (state->registry != NULL) {
-      unit_registry_free(state->registry);
-      state->registry = NULL;
-   }
-
-   if (state->mir != NULL) {
-      mir_context_free(state->mir);
-      state->mir = NULL;
-   }
-
-   state->mir = mir_context_new();
-   state->registry = unit_registry_new(state->mir);
-   state->jit = tool_new_jit(state->registry, state->mir);
-   state->model = model_new(state->jit, state->cover);
-
-   vhpi_run_callbacks(vhpiCbStartOfElaboration);
-
-   tree_t e = elab(tops, ntops, generics, ngenerics, state->jit,
-                   state->registry, state->mir, state->cover, NULL,
-                   state->model);
-
-   if (e == NULL)
+   if (tool_elaborate(state->tool, &opts, ntops, tops) == NULL)
       return EXIT_FAILURE;
-
-   lib_put_meta(state->work, e, &meta);
-
-   progress("elaborating design");
-
-   vhpi_run_callbacks(vhpiCbEndOfElaboration);
-
-   if (error_count() > 0)
-      return EXIT_FAILURE;
-
-   if (!no_save) {
-      lib_save(state->work);
-      progress("saving library");
-   }
 
    if (state->cover != NULL) {
       fbuf_t *f = fbuf_open(meta.cover_file, FBUF_OUT, FBUF_CS_NONE);
@@ -893,21 +845,6 @@ static void enable_ieee_warnings_cb(rt_model_t *m, void *ctx)
    assert(*ptr == 1);
 
    *ptr = 0;
-}
-
-static void set_tool_top(cmd_state_t *state, tree_t top, cover_data_t *cover)
-{
-   tool_set_top(state->tool, top, cover);
-
-   if (state->model != NULL) {
-      // Reuse the model left over from elaboration
-      tool_adopt(state->tool, state->model, state->jit, state->registry,
-                 state->mir);
-      state->model = NULL;
-      state->jit = NULL;
-      state->registry = NULL;
-      state->mir = NULL;
-   }
 }
 
 static int run_cmd(int argc, char **argv, cmd_state_t *state)
@@ -1096,7 +1033,7 @@ static int run_cmd(int argc, char **argv, cmd_state_t *state)
       state->cover = load_coverage(meta);
 
    tool_t *tool = state->tool;
-   set_tool_top(state, top, state->cover);
+   tool_set_top(tool, top, state->cover);
 
    if (pli_plugins == NULL && state->plugins == NULL && nplusargs > 0)
       warnf("found plusargs on command line but no VHPI plugin was loaded");
@@ -1532,7 +1469,7 @@ static tcl_shell_t *create_shell(cmd_state_t *state)
    }
 
    if (top != NULL)
-      set_tool_top(state, top, NULL);
+      tool_set_top(state->tool, top, NULL);
 
    tcl_shell_t *sh = shell_new(state->tool);
 
@@ -2637,9 +2574,6 @@ int main(int argc, char **argv)
    const int ret = process_command(argc, argv, &state);
 
    tool_free(state.tool);
-
-   if (state.model != NULL)
-      model_free(state.model);
 
    if (state.jit != NULL)
       jit_free(state.jit);   // JIT must be shut down before exiting

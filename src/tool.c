@@ -16,7 +16,10 @@
 //
 
 #include "util.h"
+#include "common.h"
+#include "diag.h"
 #include "jit/jit.h"
+#include "lib.h"
 #include "lower.h"
 #include "mir/mir-unit.h"
 #include "phase.h"
@@ -130,26 +133,18 @@ void tool_free(tool_t *tool)
 
 void tool_set_top(tool_t *tool, tree_t top, cover_data_t *cover)
 {
-   assert(tool->model == NULL);
+   if (tool->top == top)
+      return;
+
+   // Any model elaborated from the previous design is no longer valid
+   tool_close(tool);
+   tool_free_model(tool);
+
    tool->top   = top;
    tool->cover = cover;
 }
 
-void tool_adopt(tool_t *tool, rt_model_t *m, jit_t *jit, unit_registry_t *ur,
-                mir_context_t *mc)
-{
-   // Take ownership of a model created during elaboration along with
-   // the context it was elaborated in
-   assert(tool->top != NULL);
-   assert(tool->model == NULL);
-
-   tool->model    = m;
-   tool->jit      = jit;
-   tool->registry = ur;
-   tool->mir      = mc;
-}
-
-jit_t *tool_new_jit(unit_registry_t *ur, mir_context_t *mc)
+static jit_t *tool_new_jit(unit_registry_t *ur, mir_context_t *mc)
 {
    jit_t *jit = jit_new(ur, mc);
 
@@ -168,6 +163,63 @@ jit_t *tool_new_jit(unit_registry_t *ur, mir_context_t *mc)
    _nvc_sim_pkg_init();
 
    return jit;
+}
+
+tree_t tool_elaborate(tool_t *tool, const tool_elab_options_t *opts, int ntops,
+                      const ident_t *tops)
+{
+   lib_t work = opts->work ?: lib_work();
+
+   // Each elaboration starts from no errors as for a separate command
+   reset_error_count();
+
+   object_t **objs LOCAL = xmalloc_array(ntops, sizeof(object_t *));
+   for (int i = 0; i < ntops; i++) {
+      if ((objs[i] = lib_get_generic(work, tops[i], NULL)) == NULL) {
+         errorf("cannot find unit %pI in library %pI", tops[i],
+                lib_name(work));
+         return NULL;
+      }
+   }
+
+   // Elaboration starts a new simulation
+   tool_set_top(tool, NULL, NULL);
+   tool_load(tool);
+
+   tool->cover    = opts->cover;
+   tool->mir      = mir_context_new();
+   tool->registry = unit_registry_new(tool->mir);
+   tool->jit      = tool_new_jit(tool->registry, tool->mir);
+   tool->model    = model_new(tool->jit, tool->cover);
+
+   vhpi_run_callbacks(vhpiCbStartOfElaboration);
+
+   tree_t top = elab(objs, ntops, opts->generics, opts->ngenerics, tool->jit,
+                     tool->registry, tool->mir, tool->cover, NULL, tool->model);
+   if (top == NULL) {
+      tool_free_model(tool);
+      return NULL;
+   }
+
+   const unit_meta_t no_meta = {};
+   lib_put_meta(work, top, opts->meta ?: &no_meta);
+
+   progress("elaborating design");
+
+   vhpi_run_callbacks(vhpiCbEndOfElaboration);
+
+   if (error_count() > 0) {
+      tool_free_model(tool);
+      return NULL;
+   }
+
+   if (!opts->no_save) {
+      lib_save(work);
+      progress("saving library");
+   }
+
+   tool->top = top;
+   return top;
 }
 
 rt_model_t *tool_open(tool_t *tool, const tool_open_options_t *opts)

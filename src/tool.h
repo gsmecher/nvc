@@ -19,6 +19,17 @@
 #define _TOOL_H
 
 #include "prim.h"
+#include "lib.h"
+#include "phase.h"
+
+typedef struct {
+   lib_t                 work;        // Library with the design or NULL
+   const elab_generic_t *generics;    // Top-level generic overrides
+   int                   ngenerics;
+   cover_data_t         *cover;       // Coverage database or NULL
+   const unit_meta_t    *meta;        // Saved with the design or NULL
+   bool                  no_save;     // Do not save the elaborated design
+} tool_elab_options_t;
 
 typedef struct {
    const char  *plugins;     // VHPI plugins to load, comma separated
@@ -36,14 +47,13 @@ typedef struct {
 tool_t *tool_new(const tool_options_t *opts);
 void tool_free(tool_t *tool);
 void tool_set_top(tool_t *tool, tree_t top, cover_data_t *cover);
-void tool_adopt(tool_t *tool, rt_model_t *m, jit_t *jit, unit_registry_t *ur,
-                mir_context_t *mc);
+tree_t tool_elaborate(tool_t *tool, const tool_elab_options_t *opts, int ntops,
+                      const ident_t *tops);
 rt_model_t *tool_open(tool_t *tool, const tool_open_options_t *opts);
 void tool_close(tool_t *tool);
 rt_model_t *tool_model(tool_t *tool);
 tree_t tool_top(tool_t *tool);
 jit_t *tool_jit(tool_t *tool);
 void tool_interrupt(tool_t *tool);
-jit_t *tool_new_jit(unit_registry_t *ur, mir_context_t *mc);
 
 #endif  // _TOOL_H
