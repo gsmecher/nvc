@@ -27,6 +27,9 @@ assert {catch {elaborate -generic N tcl10}}
 
 # Mistakes found before elaboration starts leave the simulation open
 assert {catch {elaborate nosuch}}
+assert {catch {elaborate tcl10_pkg}}
+assert {catch {elaborate -work a-b tcl10}}
+assert {catch {elaborate -work {} tcl10}}
 assert {expr $now == 1000000}
 assert {expr [exa /x] == 5}
 

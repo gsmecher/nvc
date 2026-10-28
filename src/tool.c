@@ -28,13 +28,17 @@
 #include "scan.h"
 #include "sdf/sdf-phase.h"
 #include "tool.h"
+#include "tree.h"
 #include "vhpi/vhpi-model.h"
 #include "vlog/vlog-node.h"
 #include "vlog/vlog-phase.h"
 #include "vpi/vpi-model.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 typedef struct _tool {
    char            *plugins;
@@ -235,6 +239,34 @@ static void analyse_file(const char *file, jit_t *jit, unit_registry_t *ur,
    }
 }
 
+static bool tool_check_file(const char *file)
+{
+   if (strcmp(file, "-") == 0)
+      return true;   // Standard input
+
+   file_info_t info;
+   if (access(file, R_OK) != 0 || !get_file_info(file, &info)) {
+      errorf("opening %s: %s", file, strerror(errno));
+      return false;
+   }
+   else if (info.type != FILE_REGULAR && info.type != FILE_FIFO) {
+      errorf("opening %s: not a regular file", file);
+      return false;
+   }
+
+   return true;
+}
+
+static bool tool_check_writable(lib_t lib)
+{
+   if (lib_readonly(lib)) {
+      errorf("cannot write to read-only library %pI", lib_name(lib));
+      return false;
+   }
+
+   return true;
+}
+
 static void werror_diag_cb(diag_t *d, void *ctx)
 {
    diag_level_t level = diag_level(d, NULL);
@@ -255,6 +287,15 @@ bool tool_analyse(tool_t *tool, const tool_analyse_options_t *opts, int nfiles,
       errorf("cannot analyse while the simulation is running");
       return false;
    }
+
+   // Check for common mistakes before changing anything
+   for (int i = 0; i < nfiles; i++) {
+      if (!tool_check_file(files[i]))
+         return false;
+   }
+
+   if (!opts->no_save && !tool_check_writable(opts->work ?: lib_work()))
+      return false;
 
    // Analysis may replace design units used by the simulation, which is
    // opened again from the elaborated design when next needed
@@ -325,7 +366,23 @@ tree_t tool_elaborate(tool_t *tool, const tool_elab_options_t *opts, int ntops,
                 lib_name(work));
          return NULL;
       }
+
+      tree_t unit = tree_from_object(objs[i]);
+      if (unit != NULL) {
+         switch (tree_kind(unit)) {
+         case T_ENTITY:
+         case T_ARCH:
+         case T_CONFIGURATION:
+            break;
+         default:
+            errorf("%pI is not a suitable top-level unit", tops[i]);
+            return NULL;
+         }
+      }
    }
+
+   if (!opts->no_save && !tool_check_writable(work))
+      return NULL;
 
    if (opts->sdf != NULL) {
       // TODO: Pass min-max spec to underlying sdf_parse somehow

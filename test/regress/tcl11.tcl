@@ -49,6 +49,14 @@ assert {catch {analyse bad.vhd}}
 assert {catch {analyse}}
 assert {catch {analyse -foo tcl11.vhd}}
 
+# Mistakes found before analysis starts leave the simulation open
+elaborate tcl11
+run
+assert {catch {analyse nosuch.vhd}}
+assert {catch {analyse .}}
+assert {catch {analyse -work a-b tcl11.vhd}}
+assert {expr $now == 1000000}
+
 # The American spelling is an alias
 write_design 3
 analyze tcl11.vhd

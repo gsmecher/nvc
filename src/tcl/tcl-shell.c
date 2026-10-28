@@ -251,6 +251,18 @@ static int shell_cmd_restart(ClientData cd, Tcl_Interp *interp,
    return TCL_OK;
 }
 
+static bool shell_get_work(tcl_shell_t *sh, Tcl_Obj *obj, lib_t *work)
+{
+   const char *spec = Tcl_GetString(obj);
+   if (!lib_valid_spec(spec)) {
+      tcl_error(sh, "invalid library %s", spec);
+      return false;
+   }
+
+   *work = lib_new(spec);
+   return true;
+}
+
 static const char analyse_help[] =
    "Analyse VHDL or Verilog source files\n"
    "\n"
@@ -279,8 +291,10 @@ static int shell_cmd_analyse(ClientData cd, Tcl_Interp *interp,
 
    int pos = 1;
    for (const char *opt; (opt = next_option(&pos, objc, objv)); ) {
-      if (strcmp(opt, "-work") == 0 && pos < objc)
-         work = lib_new(Tcl_GetString(objv[pos++]));
+      if (strcmp(opt, "-work") == 0 && pos < objc) {
+         if (!shell_get_work(sh, objv[pos++], &work))
+            return TCL_ERROR;
+      }
       else
          return syntax_error(sh, objv);
    }
@@ -336,8 +350,10 @@ static int shell_cmd_elaborate(ClientData cd, Tcl_Interp *interp,
 
    int pos = 1;
    for (const char *opt; (opt = next_option(&pos, objc, objv)); ) {
-      if (strcmp(opt, "-work") == 0 && pos < objc)
-         work = lib_new(Tcl_GetString(objv[pos++]));
+      if (strcmp(opt, "-work") == 0 && pos < objc) {
+         if (!shell_get_work(sh, objv[pos++], &work))
+            return TCL_ERROR;
+      }
       else if (strcmp(opt, "-generic") == 0 && pos < objc) {
          const char *arg = Tcl_GetString(objv[pos++]);
          const char *eq = strchr(arg, '=');

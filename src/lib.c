@@ -507,10 +507,11 @@ static const char *lib_mapped_path(ident_t name_i)
    return NULL;
 }
 
-lib_t lib_new(const char *spec)
-{
-   char *copy LOCAL = xstrdup(spec);
+typedef void (*lib_report_fn_t)(const char *fmt, ...);
 
+static const char *lib_split_spec(char *copy, const char *spec,
+                                  const char **path, const char **search)
+{
 #ifdef __MINGW32__
    char *split = strchr(copy, ';');
    if (split == NULL) {
@@ -524,42 +525,75 @@ lib_t lib_new(const char *spec)
    char *split = strchr(copy, ':');
 #endif
 
-   const char *path, *name, *search = NULL;
+   const char *name;
+   *search = NULL;
    if (split == NULL) {
       // No colon in the argument means search in the given directory
       char *slash = strrchr(copy, *DIR_SEP) ?: strrchr(copy, '/');
       if (slash == NULL) {
-         name = path = copy;
-         search = ".";
+         name = *path = copy;
+         *search = ".";
       }
       else {
          *slash = '\0';
          name = slash + 1;
-         path = spec;
-         search = copy;
+         *path = spec;
+         *search = copy;
       }
    }
    else {
       // The string after the colon specifies the exact library path
       *split = '\0';
       name = copy;
-      path = split + 1;
+      *path = split + 1;
    }
 
-   if (*name == '\0')
-      fatal("library name cannot be empty");
+   return name;
+}
+
+static bool lib_check_name(const char *name, lib_report_fn_t report)
+{
+   if (*name == '\0') {
+      (*report)("library name cannot be empty");
+      return false;
+   }
 
    const char *last_dot = strrchr(name, '.');
    if (last_dot != NULL) {
       const char *ext = standard_suffix(standard());
-      if (strcmp(last_dot + 1, ext) != 0)
-         fatal("library directory suffix must be '%s' for this standard", ext);
+      if (strcmp(last_dot + 1, ext) != 0) {
+         (*report)("library directory suffix must be '%s' for this standard",
+                   ext);
+         return false;
+      }
    }
 
    for (const char *p = name; *p && p != last_dot; p++) {
-      if (!isalnum_iso88591(*p) && (*p != '_'))
-         fatal("invalid character '%c' in library name", *p);
+      if (!isalnum_iso88591(*p) && (*p != '_')) {
+         (*report)("invalid character '%c' in library name", *p);
+         return false;
+      }
    }
+
+   return true;
+}
+
+bool lib_valid_spec(const char *spec)
+{
+   // As for lib_new but reports an error rather than a fatal error
+   char *copy LOCAL = xstrdup(spec);
+   const char *path, *search;
+   const char *name = lib_split_spec(copy, spec, &path, &search);
+   return lib_check_name(name, errorf);
+}
+
+lib_t lib_new(const char *spec)
+{
+   char *copy LOCAL = xstrdup(spec);
+
+   const char *path, *search;
+   const char *name = lib_split_spec(copy, spec, &path, &search);
+   lib_check_name(name, fatal);
 
    ident_t name_i = upcase_name(name);
    lib_t lib = lib_loaded(name_i);
@@ -1033,6 +1067,11 @@ static lib_unit_t *lib_get_aux(lib_t lib, ident_t ident)
    }
 
    return lu;
+}
+
+bool lib_readonly(lib_t lib)
+{
+   return lib->readonly;
 }
 
 static void lib_ensure_writable(lib_t lib)

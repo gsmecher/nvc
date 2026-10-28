@@ -33,6 +33,7 @@ typedef struct {
 lib_t lib_find(ident_t name);
 lib_t lib_require(ident_t name) RETURNS_NONNULL;
 lib_t lib_new(const char *spec);
+bool lib_valid_spec(const char *spec);
 lib_t lib_tmp(const char *name);
 void lib_free(lib_t lib);
 FILE *lib_fopen(lib_t lib, const char *name, const char *mode);
@@ -42,6 +43,7 @@ const char *lib_path(lib_t lib);
 void lib_realpath(lib_t lib, const char *name, char *buf, size_t buflen);
 void lib_destroy(lib_t lib);
 ident_t lib_name(lib_t lib);
+bool lib_readonly(lib_t lib);
 ident_t lib_unit_name(lib_t lib, const char *str);
 void lib_save(lib_t lib);
 void lib_add_search_path(const char *path);

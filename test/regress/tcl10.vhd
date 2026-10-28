@@ -10,3 +10,6 @@ begin
     x <= N after 1 ns;
 
 end architecture;
+
+package tcl10_pkg is
+end package;
