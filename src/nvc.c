@@ -1565,24 +1565,9 @@ static int dump_cmd(int argc, char **argv, cmd_state_t *state)
    return argc > 1 ? process_command(argc, argv, state) : EXIT_SUCCESS;
 }
 
-static int do_cmd(int argc, char **argv, cmd_state_t *state)
+#ifdef ENABLE_TCL
+static tcl_shell_t *create_shell(cmd_state_t *state)
 {
-   static struct option long_options[] = {
-      { 0, 0, 0, 0 }
-   };
-
-   const int next_cmd = scan_cmd(2, argc, argv);
-   int c, index = 0;
-   const char *spec = ":";
-   while ((c = getopt_long(next_cmd, argv, spec, long_options, &index)) != -1) {
-      switch (c) {
-      case 0: break;  // Set a flag
-      case '?': bad_option("do", argv);
-      case ':': missing_argument("do", argv);
-      default: abort();
-      }
-   }
-
    if (state->mir == NULL)
       state->mir = mir_context_new();
 
@@ -1597,16 +1582,6 @@ static int do_cmd(int argc, char **argv, cmd_state_t *state)
 
    if (state->vpi == NULL)
       state->vpi = vpi_context_new();
-
-#ifdef ENABLE_TCL
-   if (optind < next_cmd && strpbrk(argv[optind], "./\\") == NULL) {
-      ident_t unit_name = to_unit_name(argv[optind]);
-      if (lib_get(state->work, unit_name) != NULL) {
-         state->top_level_arg = xstrdup(argv[optind]);
-         state->top_level = unit_name;
-         optind++;
-      }
-   }
 
    tree_t top = NULL;
    if (state->top_level != NULL) {
@@ -1631,6 +1606,40 @@ static int do_cmd(int argc, char **argv, cmd_state_t *state)
 
    if (top != NULL)
       shell_reset(sh);
+
+   return sh;
+}
+#endif
+
+static int do_cmd(int argc, char **argv, cmd_state_t *state)
+{
+   static struct option long_options[] = {
+      { 0, 0, 0, 0 }
+   };
+
+   const int next_cmd = scan_cmd(2, argc, argv);
+   int c, index = 0;
+   const char *spec = ":";
+   while ((c = getopt_long(next_cmd, argv, spec, long_options, &index)) != -1) {
+      switch (c) {
+      case 0: break;  // Set a flag
+      case '?': bad_option("do", argv);
+      case ':': missing_argument("do", argv);
+      default: abort();
+      }
+   }
+
+#ifdef ENABLE_TCL
+   if (optind < next_cmd && strpbrk(argv[optind], "./\\") == NULL) {
+      ident_t unit_name = to_unit_name(argv[optind]);
+      if (lib_get(state->work, unit_name) != NULL) {
+         state->top_level_arg = xstrdup(argv[optind]);
+         state->top_level = unit_name;
+         optind++;
+      }
+   }
+
+   tcl_shell_t *sh = create_shell(state);
 
    if (optind == next_cmd)
       fatal("no script file specified");
@@ -1680,48 +1689,11 @@ static int interact_cmd(int argc, char **argv, cmd_state_t *state)
       }
    }
 
-   if (state->mir == NULL)
-      state->mir = mir_context_new();
-
-   if (state->registry == NULL)
-      state->registry = unit_registry_new(state->mir);
-
-   if (state->jit == NULL)
-      state->jit = get_jit(state);
-
-   if (state->vhpi == NULL)
-      state->vhpi = vhpi_context_new();
-
-   if (state->vpi == NULL)
-      state->vpi = vpi_context_new();
-
 #ifdef ENABLE_TCL
    if (optind < next_cmd)
       set_top_level(argv, next_cmd, state);
 
-   tree_t top = NULL;
-   if (state->top_level != NULL) {
-      ident_t ename = ident_prefix(state->top_level, well_known(W_ELAB), '.');
-      top = lib_get(state->work, ename);
-      if (top == NULL)
-         fatal("%s not elaborated", istr(state->top_level));
-   }
-
-   if (top != NULL && state->model == NULL) {
-      state->model = model_new(state->jit, NULL);
-      reheat(top, state->registry, state->mir, NULL, state->model);
-   }
-
-   if (state->model != NULL) {
-      vhpi_context_initialise(state->vhpi, top, state->model, state->jit);
-      vpi_context_initialise(state->vpi, top, state->model, state->jit,
-                             0, NULL);
-   }
-
-   tcl_shell_t *sh = shell_new(top, state->jit, state->model);
-   if (top != NULL)
-      shell_reset(sh);
-
+   tcl_shell_t *sh = create_shell(state);
    shell_interact(sh);
 
    shell_free(sh);
