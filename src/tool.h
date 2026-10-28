@@ -63,6 +63,8 @@ tree_t tool_elaborate(tool_t *tool, const tool_elab_options_t *opts, int ntops,
                       const ident_t *tops);
 rt_model_t *tool_open(tool_t *tool, const tool_open_options_t *opts);
 void tool_close(tool_t *tool);
+void tool_run(tool_t *tool, uint64_t stop_time);
+bool tool_running(tool_t *tool);
 rt_model_t *tool_model(tool_t *tool);
 tree_t tool_top(tool_t *tool);
 jit_t *tool_jit(tool_t *tool);

@@ -75,7 +75,6 @@ typedef struct _tcl_shell {
    get_line_fn_t    getline;
    shell_handler_t  handler;
    bool             quit;
-   bool             running;
    unsigned         generation;
    char            *datadir;
 } tcl_shell_t;

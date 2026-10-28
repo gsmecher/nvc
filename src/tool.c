@@ -50,6 +50,7 @@ typedef struct _tool {
    jit_t           *jit;
    rt_model_t      *model;
    bool             open;
+   bool             running;
 } tool_t;
 
 static char **copy_plusargs(int nplusargs, char **plusargs)
@@ -250,6 +251,11 @@ static void werror_diag_cb(diag_t *d, void *ctx)
 bool tool_analyse(tool_t *tool, const tool_analyse_options_t *opts, int nfiles,
                   const char *const *files)
 {
+   if (tool->running) {
+      errorf("cannot analyse while the simulation is running");
+      return false;
+   }
+
    // Analysis may replace design units used by the simulation, which is
    // opened again from the elaborated design when next needed
    tool_close(tool);
@@ -302,6 +308,11 @@ bool tool_analyse(tool_t *tool, const tool_analyse_options_t *opts, int nfiles,
 tree_t tool_elaborate(tool_t *tool, const tool_elab_options_t *opts, int ntops,
                       const ident_t *tops)
 {
+   if (tool->running) {
+      errorf("cannot elaborate while the simulation is running");
+      return NULL;
+   }
+
    lib_t work = opts->work ?: lib_work();
 
    // Each elaboration starts from no errors as for a separate command
@@ -406,6 +417,8 @@ rt_model_t *tool_open(tool_t *tool, const tool_open_options_t *opts)
 
 void tool_close(tool_t *tool)
 {
+   assert(!tool->running);
+
    if (!tool->open)
       return;
 
@@ -427,6 +440,20 @@ void tool_close(tool_t *tool)
    tool->loaded = false;
 
    tool->open = false;
+}
+
+void tool_run(tool_t *tool, uint64_t stop_time)
+{
+   assert(tool->open && !tool->running);
+
+   tool->running = true;
+   model_run(tool->model, stop_time);
+   tool->running = false;
+}
+
+bool tool_running(tool_t *tool)
+{
+   return tool->running;
 }
 
 rt_model_t *tool_model(tool_t *tool)

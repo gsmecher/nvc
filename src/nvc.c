@@ -957,7 +957,7 @@ static int run_cmd(int argc, char **argv, cmd_state_t *state)
    if (opt_get_int(OPT_IEEE_WARNINGS) == IEEE_WARNINGS_OFF_AT_0)
       model_set_phase_cb(model, END_TIME_STEP, enable_ieee_warnings_cb, state);
 
-   model_run(model, stop_time);
+   tool_run(tool, stop_time);
    model_end(model);
 
    set_ctrl_c_handler(NULL, NULL);

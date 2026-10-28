@@ -200,7 +200,7 @@ static int shell_cmd_restart(ClientData cd, Tcl_Interp *interp,
       return syntax_error(sh, objv);
    else if (!shell_has_model(sh))
       return TCL_ERROR;
-   else if (sh->running)
+   else if (tool_running(sh->tool))
       return tcl_error(sh, "cannot restart while the simulation is running");
 
    tool_close(sh->tool);
@@ -220,7 +220,7 @@ static int shell_cmd_run(ClientData cd, Tcl_Interp *interp,
 
    if (!shell_has_model(sh))
       return TCL_ERROR;
-   else if (sh->running)
+   else if (tool_running(sh->tool))
       return tcl_error(sh, "simulation already running");
 
    uint64_t stop_time = UINT64_MAX;
@@ -247,9 +247,7 @@ static int shell_cmd_run(ClientData cd, Tcl_Interp *interp,
       return tcl_error(sh, "usage: $bold$run [time units]$$");
 
 
-   sh->running = true;
-   model_run(sh->model, stop_time);
-   sh->running = false;
+   tool_run(sh->tool, stop_time);
 
    shell_update_now(sh);
 
