@@ -3761,13 +3761,23 @@ void model_interrupt(rt_model_t *m)
    jit_interrupt(m->jit, handle_interrupt_cb, m);
 }
 
+bool model_stopped(rt_model_t *m, int *status)
+{
+   if (jit_exit_status(m->jit, status))
+      return true;
+   else if (m->stop_delta > 0 && m->iteration == m->stop_delta) {
+      *status = EXIT_FAILURE;
+      return true;
+   }
+   else
+      return false;
+}
+
 int model_exit_status(rt_model_t *m)
 {
    int status;
-   if (jit_exit_status(m->jit, &status))
+   if (model_stopped(m, &status))
       return status;
-   else if (m->stop_delta > 0 && m->iteration == m->stop_delta)
-      return EXIT_FAILURE;
    else
       return get_vhdl_assert_exit_status();
 }

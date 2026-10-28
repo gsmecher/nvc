@@ -238,6 +238,10 @@ static int shell_cmd_run(ClientData cd, Tcl_Interp *interp,
 
    shell_update_now(sh);
 
+   int status;
+   if (model_stopped(sh->model, &status) && status != 0)
+      return tcl_error(sh, "simulation stopped with status %d", status);
+
    return TCL_OK;
 }
 

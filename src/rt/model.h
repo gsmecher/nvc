@@ -51,6 +51,7 @@ int64_t model_next_time(rt_model_t *m);
 void model_stop(rt_model_t *m);
 void model_interrupt(rt_model_t *m);
 int model_exit_status(rt_model_t *m);
+bool model_stopped(rt_model_t *m, int *status);
 
 rt_watch_t *watch_new(rt_model_t *m, sig_event_fn_t fn, void *user,
                       watch_kind_t kind, unsigned slots);

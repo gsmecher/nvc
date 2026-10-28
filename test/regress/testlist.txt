@@ -1500,3 +1500,4 @@ vhpi24          vhpi
 vhpi26          vhpi,2008,plugin=siginit,+siginit+one
 cmdline22       shell
 cmdline23       shell,tcl
+tcl7            tcl
