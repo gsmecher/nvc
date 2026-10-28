@@ -201,11 +201,10 @@ static int shell_cmd_run(ClientData cd, Tcl_Interp *interp,
                          int objc, Tcl_Obj *const objv[])
 {
    tcl_shell_t *sh = cd;
-   static bool sim_running = false;
 
    if (!shell_has_model(sh))
       return TCL_ERROR;
-   else if (sim_running)
+   else if (sh->running)
       return tcl_error(sh, "simulation already running");
 
    uint64_t stop_time = UINT64_MAX;
@@ -232,9 +231,9 @@ static int shell_cmd_run(ClientData cd, Tcl_Interp *interp,
       return tcl_error(sh, "usage: $bold$run [time units]$$");
 
 
-   sim_running = true;
+   sh->running = true;
    model_run(sh->model, stop_time);
-   sim_running = false;
+   sh->running = false;
 
    shell_update_now(sh);
 
