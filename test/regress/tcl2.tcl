@@ -15,15 +15,20 @@ run
 
 assert {expr [exa /x] == 2}
 
-# TODO: reimplement restart command
+set root [vhpi::handle RootInst 0]
 
-# restart
+restart
 
-# puts [exa /x]
-# assert {expr [exa /x] == -2147483648}
+puts [exa /x]
+assert {expr [exa /x] == -2147483648}
 
-# assert {expr $now == 0}
+assert {expr $now == 0}
 
-# run
+# Handles from before the restart are no longer valid
+assert {catch {vhpi::get_str Name $root}}
+set root [vhpi::handle RootInst 0]
+vhpi::assert {[vhpi::get_str Name $root] == "TCL2"}
 
-# assert {expr [exa /x] == 2}
+run
+
+assert {expr [exa /x] == 2}

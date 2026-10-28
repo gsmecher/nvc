@@ -186,13 +186,28 @@ static shell_signal_t *get_signal(tcl_shell_t *sh, const char *name)
 }
 
 static const char restart_help[] =
-   "Restart the simulation";
+   "Restart the simulation from time zero\n"
+   "\n"
+   "Forces and VHPI handles from the previous run are discarded and any\n"
+   "plugins are loaded again.\n";
 
 static int shell_cmd_restart(ClientData cd, Tcl_Interp *interp,
                              int objc, Tcl_Obj *const objv[])
 {
    tcl_shell_t *sh = cd;
-   return tcl_error(sh, "restart command is not currently supported");
+
+   if (objc != 1)
+      return syntax_error(sh, objv);
+   else if (!shell_has_model(sh))
+      return TCL_ERROR;
+   else if (sh->running)
+      return tcl_error(sh, "cannot restart while the simulation is running");
+
+   tool_close(sh->tool);
+   sh->generation++;
+
+   shell_reset(sh);
+   return TCL_OK;
 }
 
 static const char run_help[] =
@@ -925,14 +940,27 @@ tcl_shell_t *shell_new(tool_t *tool)
    return sh;
 }
 
-void shell_free(tcl_shell_t *sh)
+static void shell_clear_objects(tcl_shell_t *sh)
 {
-   hash_free(sh->namemap);
-   printer_free(sh->printer);
-   Tcl_DeleteInterp(sh->interp);
+   if (sh->namemap != NULL)
+      hash_free(sh->namemap);
 
    free(sh->signals);
    free(sh->regions);
+
+   sh->namemap  = NULL;
+   sh->signals  = NULL;
+   sh->regions  = NULL;
+   sh->nsignals = 0;
+   sh->nregions = 0;
+}
+
+void shell_free(tcl_shell_t *sh)
+{
+   shell_clear_objects(sh);
+   printer_free(sh->printer);
+   Tcl_DeleteInterp(sh->interp);
+
    free(sh->datadir);
    free(sh->prompt);
    free(sh->cmds);
@@ -1031,6 +1059,8 @@ static void recurse_objects(tcl_shell_t *sh, rt_scope_t *scope,
 
 void shell_reset(tcl_shell_t *sh)
 {
+   shell_clear_objects(sh);
+
    // The VHPI commands need an initialised VHPI context
    const tool_open_options_t opts = { .vhpi = true };
    sh->model = tool_open(sh->tool, &opts);
@@ -1039,7 +1069,6 @@ void shell_reset(tcl_shell_t *sh)
    if ((sh->root = find_scope(sh->model, tree_stmt(top, 0))) == NULL)
       fatal_trace("cannot find root scope");
 
-   sh->nsignals = sh->nregions = 0;
    count_objects(sh->root, &sh->nsignals, &sh->nregions);
 
    sh->signals = xcalloc_array(sh->nsignals, sizeof(shell_signal_t));

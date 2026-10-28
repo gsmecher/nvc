@@ -25,35 +25,42 @@
 #include <ctype.h>
 #include <string.h>
 
+typedef struct {
+   int          refcnt;
+   unsigned     generation;
+   tcl_shell_t *owner;
+} vhpi_obj_ref_t;
+
+static bool is_stale_vhpi_obj(Tcl_Obj *obj)
+{
+   // Handles from before the simulation was restarted refer to an old
+   // VHPI context
+   vhpi_obj_ref_t *ref = obj->internalRep.twoPtrValue.ptr2;
+   return ref->generation != ref->owner->generation;
+}
+
 static void free_vhpi_obj(Tcl_Obj *obj)
 {
-   int *refcnt = obj->internalRep.twoPtrValue.ptr2;
-   if (refcnt != NULL) {
-      assert(*refcnt > 0);
-      if (--(*refcnt) > 0)
-         return;
-
-      ckfree(refcnt);
-   }
+   vhpi_obj_ref_t *ref = obj->internalRep.twoPtrValue.ptr2;
+   assert(ref->refcnt > 0);
+   if (--(ref->refcnt) > 0)
+      return;
 
    vhpiHandleT handle = obj->internalRep.twoPtrValue.ptr1;
-   if (handle != NULL)
+   if (handle != NULL && !is_stale_vhpi_obj(obj))
       vhpi_release_handle(handle);
+
+   ckfree(ref);
 }
 
 static void dup_vhpi_obj(Tcl_Obj *src, Tcl_Obj *dup)
 {
-   int *refcnt = src->internalRep.twoPtrValue.ptr2;
-   if (refcnt == NULL) {
-      src->internalRep.twoPtrValue.ptr2 = refcnt = ckalloc(sizeof(int));
-      *refcnt = 1;
-   }
-
-   assert(*refcnt > 0);
-   (*refcnt)++;
+   vhpi_obj_ref_t *ref = src->internalRep.twoPtrValue.ptr2;
+   assert(ref->refcnt > 0);
+   ref->refcnt++;
 
    dup->internalRep.twoPtrValue.ptr1 = src->internalRep.twoPtrValue.ptr1;
-   dup->internalRep.twoPtrValue.ptr2 = refcnt;
+   dup->internalRep.twoPtrValue.ptr2 = ref;
    dup->typePtr = src->typePtr;
 }
 
@@ -66,6 +73,8 @@ static void update_obj_string_rep(Tcl_Obj *obj)
    char buf[32];
    if (handle == NULL)
       obj->length = checked_sprintf(buf, sizeof(buf), "NULL@0x0");
+   else if (is_stale_vhpi_obj(obj))
+      obj->length = checked_sprintf(buf, sizeof(buf), "stale@%p", handle);
    else {
       const vhpiCharT *kind = vhpi_get_str(vhpiKindStrP, handle);
       obj->length = checked_sprintf(buf, sizeof(buf), "%s@%p", kind, handle);
@@ -83,11 +92,16 @@ static Tcl_ObjType vhpiHandleType = {
    .setFromAnyProc   = NULL
 };
 
-static Tcl_Obj *new_vhpi_obj(vhpiHandleT h)
+static Tcl_Obj *new_vhpi_obj(tcl_shell_t *sh, vhpiHandleT h)
 {
+   vhpi_obj_ref_t *ref = ckalloc(sizeof(vhpi_obj_ref_t));
+   ref->refcnt     = 1;
+   ref->generation = sh->generation;
+   ref->owner      = sh;
+
    Tcl_Obj *obj = Tcl_NewObj();
    obj->internalRep.twoPtrValue.ptr1 = h;
-   obj->internalRep.twoPtrValue.ptr2 = NULL;
+   obj->internalRep.twoPtrValue.ptr2 = ref;
    obj->typePtr = &vhpiHandleType;
    Tcl_InvalidateStringRep(obj);
    return obj;
@@ -97,6 +111,13 @@ static bool get_vhpi_obj(Tcl_Interp *interp, Tcl_Obj *obj, vhpiHandleT *handle)
 {
    if (obj->typePtr == &vhpiHandleType) {
       *handle = obj->internalRep.twoPtrValue.ptr1;
+
+      if (*handle != NULL && is_stale_vhpi_obj(obj)) {
+         Tcl_SetObjResult(interp, Tcl_NewStringObj(
+            "VHPI handle is from before the simulation was restarted", -1));
+         return false;
+      }
+
       return true;
    }
 
@@ -528,7 +549,7 @@ static int wrap_null(ClientData cd, Tcl_Interp *interp,
       return TCL_ERROR;
    }
 
-   Tcl_Obj *obj = new_vhpi_obj(NULL);
+   Tcl_Obj *obj = new_vhpi_obj(cd, NULL);
    Tcl_SetObjResult(interp, obj);
    return TCL_OK;
 }
@@ -553,7 +574,7 @@ static int wrap_handle(ClientData cd, Tcl_Interp *interp,
    if (result == NULL)
       return wrap_check_error(interp);
 
-   Tcl_Obj *obj = new_vhpi_obj(result);
+   Tcl_Obj *obj = new_vhpi_obj(cd, result);
    Tcl_SetObjResult(interp, obj);
    return TCL_OK;
 }
@@ -576,7 +597,7 @@ static int wrap_handle_by_name(ClientData cd, Tcl_Interp *interp,
    if (result == NULL)
       return wrap_check_error(interp);
 
-   Tcl_Obj *obj = new_vhpi_obj(result);
+   Tcl_Obj *obj = new_vhpi_obj(cd, result);
    Tcl_SetObjResult(interp, obj);
    return TCL_OK;
 }
@@ -605,7 +626,7 @@ static int wrap_handle_by_index(ClientData cd, Tcl_Interp *interp,
    if (result == NULL)
       return wrap_check_error(interp);
 
-   Tcl_Obj *obj = new_vhpi_obj(result);
+   Tcl_Obj *obj = new_vhpi_obj(cd, result);
    Tcl_SetObjResult(interp, obj);
    return TCL_OK;
 }
@@ -637,7 +658,7 @@ static int wrap_iterate(ClientData cd, Tcl_Interp *interp,
       if (h == NULL)
          break;
 
-      Tcl_ListObjAppendElement(interp, list, new_vhpi_obj(h));
+      Tcl_ListObjAppendElement(interp, list, new_vhpi_obj(cd, h));
    }
 
    Tcl_SetObjResult(interp, list);
