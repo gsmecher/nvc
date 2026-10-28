@@ -18,6 +18,8 @@
 #include "test_util.h"
 #include "ident.h"
 #include "jit/jit.h"
+#include "lower.h"
+#include "mir/mir-unit.h"
 #include "phase.h"
 #include "rt/model.h"
 #include "scan.h"
@@ -26,7 +28,7 @@
 
 START_TEST(test_sanity)
 {
-   tcl_shell_t *sh = shell_new(NULL, NULL, NULL);
+   tcl_shell_t *sh = shell_new(NULL);
 
    const char *result = NULL;
    fail_unless(shell_eval(sh, "expr 1 + 2", &result));
@@ -57,8 +59,8 @@ START_TEST(test_examine1)
 
    const char *result = NULL;
 
-   mir_context_t *mc = get_mir();
-   unit_registry_t *ur = get_registry();
+   mir_context_t *mc = mir_context_new();
+   unit_registry_t *ur = unit_registry_new(mc);
    jit_t *j = tool_new_jit(ur, mc);
 
    input_from_file(TESTDIR "/shell/examine1.vhd");
@@ -71,7 +73,11 @@ START_TEST(test_examine1)
    tree_t top = elab(tops, 1, NULL, 0, j, ur, mc, NULL, NULL, m);
    fail_if(top == NULL);
 
-   tcl_shell_t *sh = shell_new(top, j, m);
+   tool_t *tool = tool_new(NULL);
+   tool_set_top(tool, top, NULL);
+   tool_adopt(tool, m, j, ur, mc);
+
+   tcl_shell_t *sh = shell_new(tool);
    shell_reset(sh);
 
    const char *tests[][2] = {
@@ -100,8 +106,7 @@ START_TEST(test_examine1)
    }
 
    shell_free(sh);
-   model_free(m);
-   jit_free(j);
+   tool_free(tool);
 
    check_expected_errors();
 }
@@ -131,7 +136,7 @@ static void stderr_handler(const char *buf, size_t nchars, void *ctx)
 
 START_TEST(test_redirect)
 {
-   tcl_shell_t *sh = shell_new(NULL, NULL, NULL);
+   tcl_shell_t *sh = shell_new(NULL);
 
    int state = 0;
    shell_handler_t handler = {
@@ -163,7 +168,7 @@ static void exit_handler(int status, void *ctx)
 
 START_TEST(test_exit)
 {
-   tcl_shell_t *sh = shell_new(NULL, NULL, NULL);
+   tcl_shell_t *sh = shell_new(NULL);
 
    shell_handler_t handler = {
       .exit = exit_handler
@@ -205,8 +210,8 @@ START_TEST(test_force1)
 
    input_from_file(TESTDIR "/shell/force1.vhd");
 
-   mir_context_t *mc = get_mir();
-   unit_registry_t *ur = get_registry();
+   mir_context_t *mc = mir_context_new();
+   unit_registry_t *ur = unit_registry_new(mc);
    jit_t *j = tool_new_jit(ur, mc);
 
    tree_t arch = parse_check_and_simplify(T_ENTITY, T_ARCH);
@@ -217,7 +222,11 @@ START_TEST(test_force1)
    tree_t top = elab(tops, 1, NULL, 0, j, ur, mc, NULL, NULL, m);
    fail_if(top == NULL);
 
-   tcl_shell_t *sh = shell_new(top, j, m);
+   tool_t *tool = tool_new(NULL);
+   tool_set_top(tool, top, NULL);
+   tool_adopt(tool, m, j, ur, mc);
+
+   tcl_shell_t *sh = shell_new(tool);
    shell_reset(sh);
 
    int state = 0;
@@ -266,8 +275,7 @@ START_TEST(test_force1)
    ck_assert_str_eq(result, "");
 
    shell_free(sh);
-   model_free(m);
-   jit_free(j);
+   tool_free(tool);
 
    check_expected_errors();
 }
@@ -283,7 +291,7 @@ static void echo_stdout_handler(const char *buf, size_t nchars, void *ctx)
 
 START_TEST(test_echo)
 {
-   tcl_shell_t *sh = shell_new(NULL, NULL, NULL);
+   tcl_shell_t *sh = shell_new(NULL);
 
    int state = 0;
    shell_handler_t handler = {
@@ -310,8 +318,8 @@ START_TEST(test_describe1)
    };
    expect_errors(expect);
 
-   mir_context_t *mc = get_mir();
-   unit_registry_t *ur = get_registry();
+   mir_context_t *mc = mir_context_new();
+   unit_registry_t *ur = unit_registry_new(mc);
    jit_t *j = tool_new_jit(ur, mc);
 
    input_from_file(TESTDIR "/shell/describe1.vhd");
@@ -324,7 +332,11 @@ START_TEST(test_describe1)
    tree_t top = elab(tops, 1, NULL, 0, j, ur, mc, NULL, NULL, m);
    fail_if(top == NULL);
 
-   tcl_shell_t *sh = shell_new(top, j, m);
+   tool_t *tool = tool_new(NULL);
+   tool_set_top(tool, top, NULL);
+   tool_adopt(tool, m, j, ur, mc);
+
+   tcl_shell_t *sh = shell_new(tool);
    shell_reset(sh);
 
    const char *result = NULL;
@@ -348,8 +360,7 @@ START_TEST(test_describe1)
    }
 
    shell_free(sh);
-   model_free(m);
-   jit_free(j);
+   tool_free(tool);
 
    check_expected_errors();
 }

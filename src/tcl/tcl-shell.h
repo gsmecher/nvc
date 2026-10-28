@@ -27,7 +27,7 @@ typedef struct {
    void *context;
 } shell_handler_t;
 
-tcl_shell_t *shell_new(tree_t top, jit_t *jit, rt_model_t *m);
+tcl_shell_t *shell_new(tool_t *tool);
 void shell_free(tcl_shell_t *sh);
 bool shell_eval(tcl_shell_t *sh, const char *script, const char **result);
 bool shell_do(tcl_shell_t *sh, const char *file);

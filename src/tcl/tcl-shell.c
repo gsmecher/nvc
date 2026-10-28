@@ -26,6 +26,7 @@
 #include "tcl/tcl-priv.h"
 #include "tcl/tcl-shell.h"
 #include "tcl/tcl-structs.h"
+#include "tool.h"
 #include "tree.h"
 #include "type.h"
 
@@ -856,7 +857,7 @@ static int compare_shell_cmd(const void *a, const void *b)
    return strcmp(((shell_cmd_t *)a)->name, ((shell_cmd_t *)b)->name);
 }
 
-tcl_shell_t *shell_new(tree_t top, jit_t *jit, rt_model_t *m)
+tcl_shell_t *shell_new(tool_t *tool)
 {
    tcl_shell_t *sh = xcalloc(sizeof(tcl_shell_t));
 #ifdef RL_VERSION_MAJOR
@@ -865,9 +866,7 @@ tcl_shell_t *shell_new(tree_t top, jit_t *jit, rt_model_t *m)
    sh->prompt  = nvc_asprintf("$+cyan$%%$$ ");
 #endif
    sh->interp  = Tcl_CreateInterp();
-   sh->top     = top;
-   sh->jit     = jit;
-   sh->model   = m;
+   sh->tool    = tool;
    sh->printer = printer_new();
 
    if (isatty(fileno(stdin)))
@@ -928,9 +927,6 @@ tcl_shell_t *shell_new(tree_t top, jit_t *jit, rt_model_t *m)
 
 void shell_free(tcl_shell_t *sh)
 {
-   if (sh->model != NULL)
-      model_end(sh->model);
-
    hash_free(sh->namemap);
    printer_free(sh->printer);
    Tcl_DeleteInterp(sh->interp);
@@ -1035,9 +1031,12 @@ static void recurse_objects(tcl_shell_t *sh, rt_scope_t *scope,
 
 void shell_reset(tcl_shell_t *sh)
 {
-   model_reset(sh->model);
+   // The VHPI commands need an initialised VHPI context
+   const tool_open_options_t opts = { .vhpi = true };
+   sh->model = tool_open(sh->tool, &opts);
 
-   if ((sh->root = find_scope(sh->model, tree_stmt(sh->top, 0))) == NULL)
+   tree_t top = tool_top(sh->tool);
+   if ((sh->root = find_scope(sh->model, tree_stmt(top, 0))) == NULL)
       fatal_trace("cannot find root scope");
 
    sh->nsignals = sh->nregions = 0;

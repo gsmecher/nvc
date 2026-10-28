@@ -60,15 +60,14 @@ typedef struct _tcl_shell {
    shell_cmd_t     *cmds;
    size_t           ncmds;
    size_t           cmdalloc;
+   tool_t          *tool;
    rt_model_t      *model;
-   tree_t           top;
    rt_scope_t      *root;
    shell_signal_t  *signals;
    unsigned         nsignals;
    shell_region_t  *regions;
    unsigned         nregions;
    hash_t          *namemap;
-   jit_t           *jit;
    int64_t          now_var;
    unsigned         deltas_var;
    int              interactive_var;

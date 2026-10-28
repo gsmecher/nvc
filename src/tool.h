@@ -20,6 +20,30 @@
 
 #include "prim.h"
 
+typedef struct {
+   const char  *plugins;     // VHPI plugins to load, comma separated
+   int          nplusargs;   // Plusargs passed to the plugins
+   char       **plusargs;
+} tool_options_t;
+
+typedef struct {
+   const char  *plugins;     // Plugins loaded after VHPI is initialised
+   int          nplusargs;   // Plusargs for this simulation only
+   char       **plusargs;
+   bool         vhpi;        // Initialise VHPI even without plugins
+} tool_open_options_t;
+
+tool_t *tool_new(const tool_options_t *opts);
+void tool_free(tool_t *tool);
+void tool_set_top(tool_t *tool, tree_t top, cover_data_t *cover);
+void tool_adopt(tool_t *tool, rt_model_t *m, jit_t *jit, unit_registry_t *ur,
+                mir_context_t *mc);
+rt_model_t *tool_open(tool_t *tool, const tool_open_options_t *opts);
+void tool_close(tool_t *tool);
+rt_model_t *tool_model(tool_t *tool);
+tree_t tool_top(tool_t *tool);
+jit_t *tool_jit(tool_t *tool);
+void tool_interrupt(tool_t *tool);
 jit_t *tool_new_jit(unit_registry_t *ur, mir_context_t *mc);
 
 #endif  // _TOOL_H

@@ -23,6 +23,7 @@
 #include "rt/model.h"
 #include "rt/structs.h"
 #include "scan.h"
+#include "tool.h"
 #include "type.h"
 
 START_TEST(test_basic1)
@@ -497,6 +498,42 @@ START_TEST(test_split1)
 }
 END_TEST
 
+START_TEST(test_sim1)
+{
+   input_from_file(TESTDIR "/model/basic1.vhd");
+
+   tree_t top = run_elab();
+   fail_if(top == NULL);
+
+   tool_t *s = tool_new(NULL);
+   tool_set_top(s, top, NULL);
+   ck_assert_ptr_null(tool_model(s));
+
+   tree_t b0 = tree_stmt(top, 0);
+   tree_t x = tree_decl(b0, 1);
+
+   for (int i = 0; i < 2; i++) {
+      rt_model_t *m = tool_open(s, NULL);
+      ck_assert_ptr_nonnull(m);
+      ck_assert_ptr_eq(tool_model(s), m);
+
+      rt_signal_t *xs = find_signal(find_scope(m, b0), x, NULL);
+      fail_if(xs == NULL);
+
+      ck_assert_int_eq(*(const int32_t *)signal_value(xs), 42);
+      model_run(m, UINT64_MAX);
+      ck_assert_int_eq(*(const int32_t *)signal_value(xs), 43);
+
+      tool_close(s);
+      ck_assert_ptr_null(tool_model(s));
+   }
+
+   tool_free(s);
+
+   fail_if_errors();
+}
+END_TEST
+
 Suite *get_model_tests(void)
 {
    Suite *s = suite_create("model");
@@ -512,6 +549,7 @@ Suite *get_model_tests(void)
    tcase_add_test(tc, test_event1);
    tcase_add_test(tc, test_process1);
    tcase_add_test(tc, test_split1);
+   tcase_add_test(tc, test_sim1);
    suite_add_tcase(s, tc);
 
    return s;

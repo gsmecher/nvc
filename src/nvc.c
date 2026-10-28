@@ -65,8 +65,7 @@ typedef struct {
    unit_registry_t *registry;
    mir_context_t   *mir;
    bool             user_set_std;
-   vhpi_context_t  *vhpi;
-   vpi_context_t   *vpi;
+   tool_t          *tool;
    char            *plugins;
    rt_model_t      *model;
    cover_data_t    *cover;
@@ -188,8 +187,6 @@ static void analyse_file(const char *file, cmd_state_t *state)
          file_ref_t file_ref = loc_file_ref(file, NULL);
          input_from_buffer(tb_get(tb), tb_len(tb), file_ref, SOURCE_VERILOG);
 
-         if (state->vpi == NULL)
-            state->vpi = vpi_context_new();
 
          lib_t work = lib_work();
          vlog_node_t module;
@@ -405,8 +402,7 @@ static int analyse(int argc, char **argv, cmd_state_t *state)
 
    state->jit = jit_new(state->registry, state->mir);
 
-   if (state->vhpi != NULL)
-      vhpi_run_callbacks(vhpiCbStartOfAnalysis);
+   vhpi_run_callbacks(vhpiCbStartOfAnalysis);
 
    if (file_list != NULL)
       do_file_list(file_list, state);
@@ -420,8 +416,7 @@ static int analyse(int argc, char **argv, cmd_state_t *state)
          analyse_file(argv[i], state);
    }
 
-   if (state->vhpi != NULL)
-      vhpi_run_callbacks(vhpiCbEndOfAnalysis);
+   vhpi_run_callbacks(vhpiCbEndOfAnalysis);
 
    if (werror)
       diag_remove_hint_fn(werror_diag_cb, NULL);
@@ -695,12 +690,6 @@ static int elaborate(int argc, char **argv, cmd_state_t *state)
    state->jit = tool_new_jit(state->registry, state->mir);
    state->model = model_new(state->jit, state->cover);
 
-   if (state->vhpi == NULL)
-      state->vhpi = vhpi_context_new();
-
-   if (state->vpi == NULL)
-      state->vpi = vpi_context_new();
-
    vhpi_run_callbacks(vhpiCbStartOfElaboration);
 
    tree_t e = elab(tops, ntops, generics, ngenerics, state->jit,
@@ -841,8 +830,7 @@ static int parse_stop_delta(const char *str)
 
 static void ctrl_c_handler(void *arg)
 {
-   rt_model_t *model = arg;
-   model_interrupt(model);
+   tool_interrupt(arg);
 }
 
 static int plusarg_cmp(const void *lptr, const void *rptr)
@@ -873,7 +861,7 @@ static cover_data_t *load_coverage(const unit_meta_t *meta)
    return db;
 }
 
-static void emit_coverage(const unit_meta_t *meta, jit_t *j, cover_data_t *db)
+static void emit_coverage(const unit_meta_t *meta, cover_data_t *db)
 {
    assert(meta->cover_file != NULL);
 
@@ -896,14 +884,30 @@ static void enable_ieee_warnings_cb(rt_model_t *m, void *ctx)
    ident_t pkg_name = ident_new("NVC.SIM_PKG");
    ident_t var_name = ident_new("IEEE_NO_WARNING");
 
-   jit_handle_t handle = jit_lazy_compile(state->jit, pkg_name);
-   void *pkg = jit_link(state->jit, handle);
+   jit_t *jit = tool_jit(state->tool);
+   jit_handle_t handle = jit_lazy_compile(jit, pkg_name);
+   void *pkg = jit_link(jit, handle);
 
-   uint8_t *ptr = jit_get_frame_var(state->jit, handle, pkg, var_name);
+   uint8_t *ptr = jit_get_frame_var(jit, handle, pkg, var_name);
    assert(ptr != NULL);
    assert(*ptr == 1);
 
    *ptr = 0;
+}
+
+static void set_tool_top(cmd_state_t *state, tree_t top, cover_data_t *cover)
+{
+   tool_set_top(state->tool, top, cover);
+
+   if (state->model != NULL) {
+      // Reuse the model left over from elaboration
+      tool_adopt(state->tool, state->model, state->jit, state->registry,
+                 state->mir);
+      state->model = NULL;
+      state->jit = NULL;
+      state->registry = NULL;
+      state->mir = NULL;
+   }
 }
 
 static int run_cmd(int argc, char **argv, cmd_state_t *state)
@@ -1091,72 +1095,42 @@ static int run_cmd(int argc, char **argv, cmd_state_t *state)
    if (state->cover == NULL)
       state->cover = load_coverage(meta);
 
-   if (state->mir == NULL)
-      state->mir = mir_context_new();
+   tool_t *tool = state->tool;
+   set_tool_top(state, top, state->cover);
 
-   if (state->registry == NULL)
-      state->registry = unit_registry_new(state->mir);
-
-   if (state->jit == NULL)
-      state->jit = tool_new_jit(state->registry, state->mir);
-
-   if (state->model == NULL) {
-      state->model = model_new(state->jit, state->cover);
-      reheat(top, state->registry, state->mir, state->cover, state->model);
-   }
-
-   if (state->vhpi == NULL)
-      state->vhpi = vhpi_context_new();
-
-   if (state->vpi == NULL)
-      state->vpi = vpi_context_new();
-
-   if (nplusargs > 0)
-      vhpi_set_plusargs(state->vhpi, nplusargs, plusargs);
-
-   if (pli_plugins != NULL || state->plugins != NULL) {
-      vhpi_context_initialise(state->vhpi, top, state->model, state->jit);
-      vpi_context_initialise(state->vpi, top, state->model, state->jit,
-                             nplusargs, plusargs);
-   }
-   else if (nplusargs > 0)
+   if (pli_plugins == NULL && state->plugins == NULL && nplusargs > 0)
       warnf("found plusargs on command line but no VHPI plugin was loaded");
 
-   if (pli_plugins != NULL)
-      vhpi_load_plugins(pli_plugins);
+   const tool_open_options_t open_opts = {
+      .plugins   = pli_plugins,
+      .nplusargs = nplusargs,
+      .plusargs  = plusargs,
+   };
 
-   set_ctrl_c_handler(ctrl_c_handler, state->model);
+   set_ctrl_c_handler(ctrl_c_handler, tool);
 
-   model_reset(state->model);
+   rt_model_t *model = tool_open(tool, &open_opts);
 
    if (dumper != NULL)
-      wave_dumper_restart(dumper, state->model, state->jit);
+      wave_dumper_restart(dumper, model, tool_jit(tool));
 
    if (opt_get_int(OPT_IEEE_WARNINGS) == IEEE_WARNINGS_OFF_AT_0)
-      model_set_phase_cb(state->model, END_TIME_STEP,
-                         enable_ieee_warnings_cb, state);
+      model_set_phase_cb(model, END_TIME_STEP, enable_ieee_warnings_cb, state);
 
-   model_run(state->model, stop_time);
-   model_end(state->model);
+   model_run(model, stop_time);
+   model_end(model);
 
    set_ctrl_c_handler(NULL, NULL);
 
-   const int rc = model_exit_status(state->model);
+   const int rc = model_exit_status(model);
 
    if (dumper != NULL)
       wave_dumper_free(dumper);
 
    if (state->cover != NULL)
-      emit_coverage(meta, state->jit, state->cover);
+      emit_coverage(meta, state->cover);
 
-   vhpi_context_free(state->vhpi);
-   state->vhpi = NULL;
-
-   vpi_context_free(state->vpi);
-   state->vpi = NULL;
-
-   model_free(state->model);
-   state->model = NULL;
+   tool_close(tool);
 
    argc -= next_cmd - 1;
    argv += next_cmd - 1;
@@ -1549,21 +1523,6 @@ static int dump_cmd(int argc, char **argv, cmd_state_t *state)
 #ifdef ENABLE_TCL
 static tcl_shell_t *create_shell(cmd_state_t *state)
 {
-   if (state->mir == NULL)
-      state->mir = mir_context_new();
-
-   if (state->registry == NULL)
-      state->registry = unit_registry_new(state->mir);
-
-   if (state->jit == NULL)
-      state->jit = tool_new_jit(state->registry, state->mir);
-
-   if (state->vhpi == NULL)
-      state->vhpi = vhpi_context_new();
-
-   if (state->vpi == NULL)
-      state->vpi = vpi_context_new();
-
    tree_t top = NULL;
    if (state->top_level != NULL) {
       ident_t ename = ident_prefix(state->top_level, well_known(W_ELAB), '.');
@@ -1572,18 +1531,10 @@ static tcl_shell_t *create_shell(cmd_state_t *state)
          fatal("%s not elaborated", istr(state->top_level));
    }
 
-   if (top != NULL && state->model == NULL) {
-      state->model = model_new(state->jit, NULL);
-      reheat(top, state->registry, state->mir, NULL, state->model);
-   }
+   if (top != NULL)
+      set_tool_top(state, top, NULL);
 
-   if (state->model != NULL) {
-      vhpi_context_initialise(state->vhpi, top, state->model, state->jit);
-      vpi_context_initialise(state->vpi, top, state->model, state->jit,
-                             0, NULL);
-   }
-
-   tcl_shell_t *sh = shell_new(top, state->jit, state->model);
+   tcl_shell_t *sh = shell_new(state->tool);
 
    if (top != NULL)
       shell_reset(sh);
@@ -1628,23 +1579,22 @@ static int do_cmd(int argc, char **argv, cmd_state_t *state)
    for (int i = optind; i < next_cmd; i++) {
       if (!shell_do(sh, argv[i])) {
          shell_free(sh);
+         tool_close(state->tool);
          return EXIT_FAILURE;
       }
    }
 
    shell_free(sh);
+
+   // Closing the simulation resets the assertion counts
+   const int status = get_vhdl_assert_exit_status();
+   tool_close(state->tool);
+
+   if (status != 0)
+      return EXIT_FAILURE;
 #else
    fatal("compiled without TCL support");
 #endif
-
-   vhpi_context_free(state->vhpi);
-   state->vhpi = NULL;
-
-   vpi_context_free(state->vpi);
-   state->vpi = NULL;
-
-   if (get_vhdl_assert_exit_status() != 0)
-      return EXIT_FAILURE;
 
    argc -= next_cmd - 1;
    argv += next_cmd - 1;
@@ -1678,15 +1628,10 @@ static int interact_cmd(int argc, char **argv, cmd_state_t *state)
    shell_interact(sh);
 
    shell_free(sh);
+   tool_close(state->tool);
 #else
    fatal("compiled without TCL support");
 #endif
-
-   vhpi_context_free(state->vhpi);
-   state->vhpi = NULL;
-
-   vpi_context_free(state->vpi);
-   state->vpi = NULL;
 
    argc -= next_cmd - 1;
    argv += next_cmd - 1;
@@ -2676,21 +2621,22 @@ int main(int argc, char **argv)
          nplusargs++, optind++;
    }
 
-   if (state.plugins != NULL) {
-      state.vhpi = vhpi_context_new();
-
-      if (nplusargs > 0)
-         vhpi_set_plusargs(state.vhpi, nplusargs, plusargs);
-
-      vhpi_load_plugins(state.plugins);
-   }
-   else if (nplusargs > 0)
+   if (state.plugins == NULL && nplusargs > 0)
       warnf("found plusargs on command line but no VHPI plugin was loaded");
+
+   const tool_options_t tool_opts = {
+      .plugins   = state.plugins,
+      .nplusargs = nplusargs,
+      .plusargs  = plusargs,
+   };
+   state.tool = tool_new(&tool_opts);
 
    argc -= next_cmd - 1;
    argv += next_cmd - 1;
 
    const int ret = process_command(argc, argv, &state);
+
+   tool_free(state.tool);
 
    if (state.model != NULL)
       model_free(state.model);
