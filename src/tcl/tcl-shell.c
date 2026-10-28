@@ -112,12 +112,16 @@ static int no_model_error(tcl_shell_t *sh)
 
 static bool shell_has_model(tcl_shell_t *sh)
 {
-   if (sh->model == NULL) {
-      no_model_error(sh);
-      return false;
+   if (sh->model != NULL)
+      return true;
+   else if (tool_top(sh->tool) != NULL) {
+      // Open the simulation again after it was closed by analysis
+      shell_reset(sh);
+      return true;
    }
 
-   return true;
+   no_model_error(sh);
+   return false;
 }
 
 static void shell_update_now(tcl_shell_t *sh)
@@ -237,13 +241,71 @@ static int shell_cmd_restart(ClientData cd, Tcl_Interp *interp,
 
    if (objc != 1)
       return syntax_error(sh, objv);
-   else if (!shell_has_model(sh))
-      return TCL_ERROR;
+   else if (tool_top(sh->tool) == NULL)
+      return no_model_error(sh);
    else if (tool_running(sh->tool))
       return tcl_error(sh, "cannot restart while the simulation is running");
 
    shell_close(sh);
    shell_reset(sh);
+   return TCL_OK;
+}
+
+static const char analyse_help[] =
+   "Analyse VHDL or Verilog source files\n"
+   "\n"
+   "Syntax:\n"
+   "  analyse [options] <file>...\n"
+   "\n"
+   "Any existing simulation is closed first and starts again from time\n"
+   "zero when it is next used. Use elaborate to simulate the newly\n"
+   "analysed design units.\n"
+   "\n"
+   "Note \"analyze\" is an alias of this command.\n"
+   "\n"
+   "Options:\n"
+   "  -work <name>\tLibrary to analyse into.\n"
+   "\n"
+   "Examples:\n"
+   "  analyse foo.vhd bar.vhd\n"
+   "  analyse -work ip ip.vhd\n";
+
+static int shell_cmd_analyse(ClientData cd, Tcl_Interp *interp,
+                             int objc, Tcl_Obj *const objv[])
+{
+   tcl_shell_t *sh = cd;
+
+   lib_t work = lib_work();
+
+   int pos = 1;
+   for (const char *opt; (opt = next_option(&pos, objc, objv)); ) {
+      if (strcmp(opt, "-work") == 0 && pos < objc)
+         work = lib_new(Tcl_GetString(objv[pos++]));
+      else
+         return syntax_error(sh, objv);
+   }
+
+   if (pos == objc)
+      return syntax_error(sh, objv);
+   else if (tool_running(sh->tool))
+      return tcl_error(sh, "cannot analyse while the simulation is running");
+
+   const int nfiles = objc - pos;
+   const char **files LOCAL = xmalloc_array(nfiles, sizeof(char *));
+   for (int i = 0; i < nfiles; i++)
+      files[i] = Tcl_GetString(objv[pos + i]);
+
+   const tool_analyse_options_t opts = {
+      .work        = work,
+      .error_limit = TOOL_ERROR_LIMIT,
+   };
+
+   const bool ok = tool_analyse(sh->tool, &opts, nfiles, files);
+   shell_sync(sh);
+
+   if (!ok)
+      return tcl_error(sh, "analysis failed");
+
    return TCL_OK;
 }
 
@@ -1036,6 +1098,8 @@ tcl_shell_t *shell_new(tool_t *tool)
    shell_add_cmd(sh, "run", shell_cmd_run, run_help);
    shell_add_cmd(sh, "restart", shell_cmd_restart, restart_help);
    shell_add_cmd(sh, "elaborate", shell_cmd_elaborate, elaborate_help);
+   shell_add_cmd(sh, "analyse", shell_cmd_analyse, analyse_help);
+   shell_add_cmd(sh, "analyze", shell_cmd_analyse, analyse_help);
    shell_add_cmd(sh, "examine", shell_cmd_examine, examine_help);
    shell_add_cmd(sh, "exa", shell_cmd_examine, examine_help);
    shell_add_cmd(sh, "force", shell_cmd_force, force_help);

@@ -1505,3 +1505,4 @@ cmdline24       shell,tcl,gold
 tcl8            tcl,plugin=vhpi_test
 tcl9            tcl,gold,plugin=vhpi_test
 tcl10           tcl
+tcl11           tcl
